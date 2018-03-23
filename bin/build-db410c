@@ -1,0 +1,44 @@
+#!/bin/bash
+
+builder_work_dir="uc-db-builder-wkdr"
+builder_output="uc-db-build"
+
+# first do cleaning
+rm -rf ${builder_work_dir}
+
+echo "Running snap prepare with params: $@  ${builder_work_dir}"
+snap prepare-image "$@"  ${builder_work_dir}
+mkdir -p ${builder_work_dir}/root/system-data/
+mv ${builder_work_dir}/image/boot/uboot ${builder_work_dir}/system-boot
+mv ${builder_work_dir}/image/* ${builder_work_dir}/root/system-data/
+cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
+
+
+echo "check for cloud init file: [ui-cloud-init.yaml]"
+unset 'ui_cloud_init'
+if [ -f ui-cloud-init.yaml ]; then
+    ui_cloud_init="--cloud-init ui-cloud-init.yaml"
+fi
+
+echo "check for hooks dir: [ui-hooks]"
+unset 'ui_hooks'
+if [ -d ui-hooks ]; then
+    ui_hooks="--hooks-directory ui-hooks"
+fi
+
+echo "Creating sparse image for writable"
+ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')
+echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -d '${builder_work_dir}'/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M"
+mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M
+echo "Create sparse"
+echo "img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat"
+img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat
+
+dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
+mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
+mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
+
+mkdir -p ${builder_output}
+mv ${builder_work_dir}/*.img ${builder_output}
+cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
+echo "Output available in: '${builder_output}'"

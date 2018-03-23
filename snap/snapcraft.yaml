@@ -1,0 +1,54 @@
+name: db-builder
+version: "0.0.2"
+summary: toolset to build dragonboard ubuntu images flashable with fastboot
+description: |
+ toolset to build dragonboard ubuntu images flashable with fastboot 
+
+confinement: strict
+grade: stable
+
+layout:
+  /etc/mke2fs.conf:
+     bind-file: $SNAP_COMMON/etc/mke2fs.conf
+  /etc/mtools.conf:
+     bind-file: $SNAP_COMMON/etc/mtools.conf
+apps:
+    build-db410c-image:
+        command: bin/build-db410c
+        plugs: [home, mount-observe, snapd-control, network-observe ]
+        adapter: none
+        environment:
+            PATH: $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
+            LD_LIBRARY_PATH: $LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib:$SNAP/usr/lib/x86_64-linux-gnu:SNAP_LIBRARY_PATH
+
+parts:
+  e2fsprogs:
+    plugin: nil
+    stage-packages:
+      - e2fsprogs
+      - libc6
+      - libc-bin
+      - libfdisk1
+      - libuuid1
+      - libblkid1
+      - libcomerr2
+      - libudev1
+      - zlib1g
+      - liblzma5
+      - e2fslibs
+      - img2simg
+      - simg2img
+      - android-libsparse
+      - mtools
+      - squashfs-tools
+      - dosfstools
+  scripts:
+    plugin: dump
+    source: bin
+    organize:
+      '*' : bin/
+  snap-client:
+    plugin: nil
+    install: |
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/usr/bin
+      cp /snap/core/current/usr/bin/snap ${SNAPCRAFT_PART_INSTALL}/usr/bin

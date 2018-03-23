@@ -1,0 +1,5 @@
+#!/bin/bash
+
+
+[ "$(du ${SNAP_COMMON}/etc/mke2fs.conf | cut -c -1)" = "0" ] && cat $SNAP/etc/mke2fs.conf > ${SNAP_COMMON}/etc/mke2fs.conf || true
+[ "$(du ${SNAP_COMMON}/etc/mtools.conf | cut -c -1)" = "0" ] && cat $SNAP/etc/mtools.conf > ${SNAP_COMMON}/etc/mtools.conf || true
