@@ -1,39 +1,98 @@
 #!/bin/bash
 
-builder_work_dir="uc-db-builder-wkdr"
+builder_work_dir="uc-db-builder-workdir"
 builder_output="uc-db-build"
+
+unset EXTRA_SNAPS
+unset CHANNEL
+while [ "$1" != "" ]; do
+    case $1 in
+        -c | --channel)
+            CHANNEL="--channel $2"
+            shift
+            ;;
+        --extra-snaps=*)
+            EX_SNAP=$(echo $1 | awk -F= '{print $2}')
+            EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${EX_SNAP}"
+            ;;
+        -O | --output-dir)
+            builder_output="$2"
+            shift
+            ;;
+        -w | --workdir)
+            builder_work_dir="$2"
+            shift
+            ;;
+        --cloud-init)
+            if [ -n "$2" ] && [ -f $2 ]; then
+                CLOUD_INIT="$2"
+            else
+                echo "wrong cloud init user data file was passed [ $2 ]"
+                exit
+            fi
+            shift
+            ;;
+        --hooks-directory)
+            if [ -n "$2" ] && [ -d $2 ];then
+                HOOK_DIR="$2"
+            else
+                echo "wrong hooks dir was passed [ $2 ]}"
+                exit
+            fi
+            shift
+            ;;
+        *)
+            if [ -f $1 ]; then
+                MODEL_ASSERTION=$1
+            else
+                echo "Unknown parameter \'$1\'"
+                exit
+            fi
+            ;;
+    esac
+    shift
+done
+
 
 # first do cleaning
 rm -rf ${builder_work_dir}
 
-echo "Running snap prepare with params: $@  ${builder_work_dir}"
-snap prepare-image "$@"  ${builder_work_dir}
+echo "Running: snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
+snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}
+
 mkdir -p ${builder_work_dir}/root/system-data/
 mv ${builder_work_dir}/image/boot/uboot ${builder_work_dir}/system-boot
 mv ${builder_work_dir}/image/* ${builder_work_dir}/root/system-data/
 cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
 
 
-echo "check for cloud init file: [ui-cloud-init.yaml]"
-unset 'ui_cloud_init'
-if [ -f ui-cloud-init.yaml ]; then
-    ui_cloud_init="--cloud-init ui-cloud-init.yaml"
+if [ -n "${CLOUD_INIT}" ]; then
+    echo -e "\nusing passed cloud init [${CLOUD_INIT}]"
+    mkdir -p ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${CLOUD_INIT} ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/user-data
+    echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
 fi
 
-echo "check for hooks dir: [ui-hooks]"
-unset 'ui_hooks'
-if [ -d ui-hooks ]; then
-    ui_hooks="--hooks-directory ui-hooks"
+if [ -n "${HOOK_DIR}" ]; then
+   echo -e "\nInvoking hooks"
+   export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)"
+   if [ -f ${HOOK_DIR}/post-populate-rootfs ]; then
+      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)" ${HOOK_DIR}/post-populate-rootfs
+   fi
+   if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
+       UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
+   fi
 fi
 
-echo "Creating sparse image for writable"
+echo -e "\nCreating sparse image for writable"
 ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')
 echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -d '${builder_work_dir}'/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M"
 mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M
-echo "Create sparse"
+echo -e "\nCreate sparse image for writable"
 echo "img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat"
 img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat
 
+echo -e "\nCreating system-boot partition"
 dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
 mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
 mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
@@ -41,4 +100,4 @@ mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/
 mkdir -p ${builder_output}
 mv ${builder_work_dir}/*.img ${builder_output}
 cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
-echo "Output available in: '${builder_output}'"
+echo -e "\nOutput available in: '${builder_output}'"
