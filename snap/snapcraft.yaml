@@ -1,5 +1,5 @@
 name: db-builder
-version: "0.0.2"
+version: "0.0.3"
 summary: toolset to build dragonboard ubuntu images flashable with fastboot
 description: |
  toolset to build dragonboard ubuntu images flashable with fastboot 
