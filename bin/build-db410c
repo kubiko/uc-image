@@ -3,8 +3,41 @@
 builder_work_dir="uc-db-builder-workdir"
 builder_output="uc-db-build"
 
+function print_usage {
+echo "Builder for UbuntuCore for dragonboard"
+echo ""
+echo "positional arguments:"
+echo "  model_assertion       Path to the model assertion file. This argument must"
+echo "                        be given unless the state machine is being resumed, in"
+echo "                        which case it cannot be given."
+echo ""
+echo "optional arguments:"
+echo "  -h, --help            show this help message and exit"
+echo "  --extra-snaps EXTRA_SNAPS"
+echo "                        Extra snaps to install. This is passed through to"
+echo "                        `snap prepare-image`."
+echo "  -c CHANNEL, --channel CHANNEL"
+echo "                        The snap channel to use"
+echo ""
+echo "Common options:"
+echo "  --cloud-init USER-DATA-FILE"
+echo "                        cloud-config data to be copied to the image"
+echo "  --hooks-directory DIRECTORY"
+echo "                        Path of directory in which scripts for build-time hooks will be located."
+echo "  -O DIRECTORY, --output-dir DIRECTORY"
+echo "                        The directory in which to put generated disk image"
+echo "                        files."
+echo "  -w DIRECTORY, --workdir DIRECTORY"
+echo "                        The working directory in which to download and unpack"
+echo "                        all the source files for the image. This directory can"
+echo "                        exist or not, and it is not removed after this program"
+echo "                        exits. If not given, a temporary working directory is"
+echo "                        used instead"
+}
+
 unset EXTRA_SNAPS
 unset CHANNEL
+
 while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
@@ -41,18 +74,22 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
+        --help | -h)
+            print_usage
+            exit
+            ;;
         *)
             if [ -f $1 ]; then
                 MODEL_ASSERTION=$1
             else
-                echo "Unknown parameter \'$1\'"
+                echo "Unknown parameter '$1'"
+                print_usage
                 exit
             fi
             ;;
     esac
     shift
 done
-
 
 # first do cleaning
 rm -rf ${builder_work_dir}
