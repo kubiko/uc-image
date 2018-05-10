@@ -1,21 +1,25 @@
-name: db-builder
-version: "0.0.3"
-summary: toolset to build dragonboard ubuntu images flashable with fastboot
+name: dragonboard-builder
+version: "0.0.4"
+summary: ubuntu core dragonboard fastboot compatible image buider
 description: |
- toolset to build dragonboard ubuntu images flashable with fastboot 
+ toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
 
 confinement: strict
+passthrough:
 grade: stable
 
-layout:
-  /etc/mke2fs.conf:
-     bind-file: $SNAP_COMMON/etc/mke2fs.conf
-  /etc/mtools.conf:
-     bind-file: $SNAP_COMMON/etc/mtools.conf
+passthrough:
+  base: core18
+  layout:
+    /etc/mke2fs.conf:
+      bind-file: $SNAP_COMMON/etc/mke2fs.conf
+    /etc/mtools.conf:
+      bind-file: $SNAP_COMMON/etc/mtools.conf
+
 apps:
     build-db410c-image:
         command: bin/build-db410c
-        plugs: [home, mount-observe, snapd-control, network-observe ]
+        plugs: [home, mount-observe, network-observe ]
         adapter: none
         environment:
             PATH: $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
@@ -25,9 +29,9 @@ parts:
   e2fsprogs:
     plugin: nil
     stage-packages:
-      - e2fsprogs
       - libc6
       - libc-bin
+      - e2fsprogs
       - libfdisk1
       - libuuid1
       - libblkid1
@@ -42,13 +46,15 @@ parts:
       - mtools
       - squashfs-tools
       - dosfstools
+
   scripts:
     plugin: dump
     source: bin
     organize:
       '*' : bin/
+
   snap-client:
     plugin: nil
-    install: |
+    override-build: |
       mkdir -p ${SNAPCRAFT_PART_INSTALL}/usr/bin
       cp /snap/core/current/usr/bin/snap ${SNAPCRAFT_PART_INSTALL}/usr/bin
