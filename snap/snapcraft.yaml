@@ -8,6 +8,10 @@ confinement: strict
 passthrough:
 grade: stable
 
+environment:
+    PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
+    LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}"
+
 passthrough:
   base: core18
   layout:
@@ -19,14 +23,14 @@ passthrough:
 apps:
     build-db410c-image:
         command: bin/build-db410c
-        plugs: [home, mount-observe, network-observe ]
+        plugs:
+            - home
+            - mount-observe
+            - network-observe
         adapter: none
-        environment:
-            PATH: $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
-            LD_LIBRARY_PATH: $LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/usr/lib/x86_64-linux-gnu:$SNAP/usr/lib:$SNAP/usr/lib/x86_64-linux-gnu:SNAP_LIBRARY_PATH
 
 parts:
-  e2fsprogs:
+  tools:
     plugin: nil
     stage-packages:
       - libc6
@@ -46,12 +50,11 @@ parts:
       - mtools
       - squashfs-tools
       - dosfstools
+      - gdisk
 
-  scripts:
+  glue:
     plugin: dump
-    source: bin
-    organize:
-      '*' : bin/
+    source: glue
 
   snap-client:
     plugin: nil
@@ -59,3 +62,4 @@ parts:
       [ ! -d /snap/core ] && snap install core
       mkdir -p ${SNAPCRAFT_PART_INSTALL}/usr/bin
       cp /snap/core/current/usr/bin/snap ${SNAPCRAFT_PART_INSTALL}/usr/bin
+

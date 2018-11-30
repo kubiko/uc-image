@@ -2,6 +2,9 @@
 
 builder_work_dir="uc-db-builder-workdir"
 builder_output="uc-db-build"
+export PATH="$SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/x86_64-linux-gnu:$SNAP/usr/lib/x86_64-linux-gnu"
+export LD_LIBRARY_PATH=$SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH
 
 function print_usage {
 echo "Builder for UbuntuCore for dragonboard"
@@ -33,6 +36,7 @@ echo "                        all the source files for the image. This directory
 echo "                        exist or not, and it is not removed after this program"
 echo "                        exits. If not given, a temporary working directory is"
 echo "                        used instead"
+echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
 }
 
 unset EXTRA_SNAPS
@@ -73,6 +77,9 @@ while [ "$1" != "" ]; do
                 exit
             fi
             shift
+            ;;
+        --full-size)
+            BUILD_FULL_SIZE="true"
             ;;
         --help | -h)
             print_usage
@@ -122,9 +129,22 @@ if [ -n "${HOOK_DIR}" ]; then
 fi
 
 echo -e "\nCreating sparse image for writable"
-ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')
-echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -d '${builder_work_dir}'/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M"
-mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}M
+
+if [ "${BUILD_FULL_SIZE}" = "true" ]; then
+    echo "Calculating size available for writable partition"
+    # db410c storage is: 7818182656 bytes (15269854)
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
+#    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
+    echo "ROOT_SIZE=${ROOT_SIZE}"
+else
+    ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')M
+fi
+
+echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}"
+mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}
 echo -e "\nCreate sparse image for writable"
 echo "img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat"
 img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat
@@ -136,6 +156,12 @@ mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/
 
 mkdir -p ${builder_output}
 cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
+# clean blobs as there is plenty of not needed parts
+for f in *.nonsecure *.secure *.random dragonboard41c.dtb u-boot-nodtb.bin
+do
+    rm ${builder_output}/${f} || true
+done
+
 mv ${builder_work_dir}/writable.dat ${builder_output}/writable.img
 mv ${builder_work_dir}/system-boot.img ${builder_output}
 echo -e "\nOutput available in: '${builder_output}'"
