@@ -37,6 +37,8 @@ echo "                        exist or not, and it is not removed after this pro
 echo "                        exits. If not given, a temporary working directory is"
 echo "                        used instead"
 echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
+echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
+echo "                        raw images are needed when QFIL or qdl flash tools are used"
 }
 
 unset EXTRA_SNAPS
@@ -143,11 +145,11 @@ else
     ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')M
 fi
 
-echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}"
-mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.img ${ROOT_SIZE}
+echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
+mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
 echo -e "\nCreate sparse image for writable"
-echo "img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat"
-img2simg ${builder_work_dir}/writable.img ${builder_work_dir}/writable.dat
+echo "img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img"
+img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img
 
 echo -e "\nCreating system-boot partition"
 dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
@@ -156,12 +158,7 @@ mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/
 
 mkdir -p ${builder_output}
 cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
-# clean blobs as there is plenty of not needed parts
-for f in *.nonsecure *.secure *.random dragonboard41c.dtb u-boot-nodtb.bin
-do
-    rm ${builder_output}/${f} || true
-done
-
-mv ${builder_work_dir}/writable.dat ${builder_output}/writable.img
+mv ${builder_work_dir}/writable.raw ${builder_output}/
+mv ${builder_work_dir}/writable.img ${builder_output}/
 mv ${builder_work_dir}/system-boot.img ${builder_output}
 echo -e "\nOutput available in: '${builder_output}'"
