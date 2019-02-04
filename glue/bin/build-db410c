@@ -163,7 +163,7 @@ if [ "${BUILD_FULL_SIZE}" = "true" ]; then
 #    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
     echo "ROOT_SIZE=${ROOT_SIZE}"
 else
-    ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{print $1+sb+50}')M
+    ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
 fi
 
 echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
