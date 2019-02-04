@@ -25,6 +25,8 @@ echo ""
 echo "Common options:"
 echo "  --cloud-init USER-DATA-FILE"
 echo "                        cloud-config data to be copied to the image"
+echo "  --network-config NETWORK-CONFIG-FILE"
+echo "                        Network config for cloud init"
 echo "  --hooks-directory DIRECTORY"
 echo "                        Path of directory in which scripts for build-time hooks will be located."
 echo "  -O DIRECTORY, --output-dir DIRECTORY"
@@ -80,6 +82,15 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
+        --network-config)
+            if [ -n "$2" ] && [ -f $2 ]; then
+                NETWORK_CONFIG="$(readlink -f ${2})"
+            else
+                echo "wrong network config for cloud init was passed [ $2 ]"
+                exit
+            fi
+            shift
+            ;;
         --full-size)
             BUILD_FULL_SIZE="true"
             ;;
@@ -113,9 +124,16 @@ cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
 
 
 if [ -n "${CLOUD_INIT}" ]; then
-    echo -e "\nusing passed cloud init [${CLOUD_INIT}]"
+    echo -e "\nUsing passed cloud init user data configuration: [${CLOUD_INIT}]"
     mkdir -p ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net
     cp ${CLOUD_INIT} ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/user-data
+    echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
+fi
+
+if [ -n "${NETWORK_CONFIG}" ]; then
+    echo -e "\nUsing passed cloud init network configuration: [${NETWORK_CONFIG}]"
+    mkdir -p ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${NETWORK_CONFIG} ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/network-config
     echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
 fi
 
