@@ -98,6 +98,9 @@ while [ "$1" != "" ]; do
             print_usage
             exit
             ;;
+        --keep-raw)
+            KEEP_RAW="true"
+            ;;
         *)
             if [ -f $1 ]; then
                 MODEL_ASSERTION=$1
@@ -176,7 +179,9 @@ mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/
 
 mkdir -p ${builder_output}
 cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
-mv ${builder_work_dir}/writable.raw ${builder_output}/
+if [ "${KEEP_RAW}" = "true" ]; then
+    mv ${builder_work_dir}/writable.raw ${builder_output}/
+fi
 mv ${builder_work_dir}/writable.img ${builder_output}/
 mv ${builder_work_dir}/system-boot.img ${builder_output}
 echo -e "\nOutput available in: '${builder_output}'"
