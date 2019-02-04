@@ -56,6 +56,10 @@ while [ "$1" != "" ]; do
             EX_SNAP=$(echo $1 | awk -F= '{print $2}')
             EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${EX_SNAP}"
             ;;
+        --extra-snaps)
+            EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${2}"
+            shift
+            ;;
         -O | --output-dir)
             builder_output="$2"
             shift
