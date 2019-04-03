@@ -45,6 +45,7 @@ echo "                        raw images are needed when QFIL or qdl flash tools
 
 unset EXTRA_SNAPS
 unset CHANNEL
+unset BOOTLOADER
 
 while [ "$1" != "" ]; do
     case $1 in
@@ -125,9 +126,15 @@ echo "Running: snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} $
 snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}
 
 mkdir -p ${builder_work_dir}/root/system-data/
-mv ${builder_work_dir}/image/boot/uboot ${builder_work_dir}/system-boot
+if [ -d ${builder_work_dir}/image/boot/uboot ]; then
+    BOOTLOADER="uboot"
+    mv ${builder_work_dir}/image/boot/uboot ${builder_work_dir}/system-boot
+    cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
+elif [ -d ${builder_work_dir}/image/boot/lk ]; then
+    BOOTLOADER="lk"
+    mv ${builder_work_dir}/image/boot/lk ${builder_work_dir}/lk
+fi
 mv ${builder_work_dir}/image/* ${builder_work_dir}/root/system-data/
-cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
 
 
 if [ -n "${CLOUD_INIT}" ]; then
@@ -167,7 +174,13 @@ if [ "${BUILD_FULL_SIZE}" = "true" ]; then
 #    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
     echo "ROOT_SIZE=${ROOT_SIZE}"
 else
-    ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+    if [ "${BOOTLOADER}" = "uboot" ]; then
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+    elif [ "${BOOTLOADER}" = "lk" ]; then
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/lk)" '{printf("%.0f",($1+sb+50))}')M
+    else
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
+    fi
 fi
 
 echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
@@ -176,16 +189,22 @@ echo -e "\nCreate sparse image for writable"
 echo "img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img"
 img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img
 
-echo -e "\nCreating system-boot partition"
-dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
-mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
-mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
+if [ "${BOOTLOADER}" = "uboot" ]; then
+    echo -e "\nCreating system-boot partition"
+    dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
+    mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
+    mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
+fi
 
 mkdir -p ${builder_output}
-cp ${builder_work_dir}/gadget/blobs/* ${builder_output}
+cp -r ${builder_work_dir}/gadget/blobs/* ${builder_output}/
 if [ "${KEEP_RAW}" = "true" ]; then
     mv ${builder_work_dir}/writable.raw ${builder_output}/
 fi
 mv ${builder_work_dir}/writable.img ${builder_output}/
-mv ${builder_work_dir}/system-boot.img ${builder_output}
+if [ "${BOOTLOADER}" = "uboot" ]; then
+    mv ${builder_work_dir}/system-boot.img ${builder_output}
+elif [ "${BOOTLOADER}" = "lk" ]; then
+    cp ${builder_work_dir}/lk/* ${builder_output}/
+fi
 echo -e "\nOutput available in: '${builder_output}'"
