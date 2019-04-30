@@ -38,6 +38,8 @@ echo "                        all the source files for the image. This directory
 echo "                        exist or not, and it is not removed after this program"
 echo "                        exits. If not given, a temporary working directory is"
 echo "                        used instead"
+echo "  -o, --overlay"
+echo "                        directory to overlay on top of rootfs"
 echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
 echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
 echo "                        raw images are needed when QFIL or qdl flash tools are used"
@@ -46,7 +48,7 @@ echo "                        raw images are needed when QFIL or qdl flash tools
 unset EXTRA_SNAPS
 unset CHANNEL
 unset BOOTLOADER
-
+unset CUSTOM_OVERLAY
 while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
@@ -92,6 +94,15 @@ while [ "$1" != "" ]; do
                 NETWORK_CONFIG="$(readlink -f ${2})"
             else
                 echo "wrong network config for cloud init was passed [ $2 ]"
+                exit
+            fi
+            shift
+            ;;
+        -o | --overlay)
+            if [ -n "$2" ] && [ -d $2 ]; then
+                CUSTOM_OVERLAY="$(readlink -f ${2})"
+            else
+                echo "wrong overlay directory passed [ $2 ]"
                 exit
             fi
             shift
@@ -183,6 +194,11 @@ else
     fi
 fi
 
+if [ -n "${CUSTOM_OVERLAY}" ];then
+    echo "Applying custom overlay"
+    cp -r ${CUSTOM_OVERLAY}/* ${builder_work_dir}/root
+fi
+
 echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
 mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
 echo -e "\nCreate sparse image for writable"
@@ -208,3 +224,4 @@ elif [ "${BOOTLOADER}" = "lk" ]; then
     cp ${builder_work_dir}/lk/* ${builder_output}/
 fi
 echo -e "\nOutput available in: '${builder_output}'"
+

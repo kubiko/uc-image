@@ -1,6 +1,6 @@
 name: dragonboard-builder
-version: "0.1.0"
-summary: ubuntu core dragonboard fastboot compatible image buider
+version: "0.1.1"
+summary: ubuntu core fastboot compatible image buider
 description: |
  toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
 
@@ -21,8 +21,8 @@ passthrough:
       bind-file: $SNAP_COMMON/etc/mtools.conf
 
 apps:
-    build-db410c-image:
-        command: bin/build-db410c
+    build-uc-image:
+        command: bin/build-uc-image
         plugs:
             - home
             - mount-observe
