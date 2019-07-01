@@ -7,48 +7,57 @@ export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/x86_6
 export LD_LIBRARY_PATH=$SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH
 
 function print_usage {
-echo "Builder for UbuntuCore for dragonboard"
-echo ""
-echo "positional arguments:"
-echo "  model_assertion       Path to the model assertion file. This argument must"
-echo "                        be given unless the state machine is being resumed, in"
-echo "                        which case it cannot be given."
-echo ""
-echo "optional arguments:"
-echo "  -h, --help            show this help message and exit"
-echo "  --extra-snaps EXTRA_SNAPS"
-echo "                        Extra snaps to install. This is passed through to"
-echo "                        `snap prepare-image`."
-echo "  -c CHANNEL, --channel CHANNEL"
-echo "                        The snap channel to use"
-echo ""
-echo "Common options:"
-echo "  --cloud-init USER-DATA-FILE"
-echo "                        cloud-config data to be copied to the image"
-echo "  --network-config NETWORK-CONFIG-FILE"
-echo "                        Network config for cloud init"
-echo "  --hooks-directory DIRECTORY"
-echo "                        Path of directory in which scripts for build-time hooks will be located."
-echo "  -O DIRECTORY, --output-dir DIRECTORY"
-echo "                        The directory in which to put generated disk image"
-echo "                        files."
-echo "  -w DIRECTORY, --workdir DIRECTORY"
-echo "                        The working directory in which to download and unpack"
-echo "                        all the source files for the image. This directory can"
-echo "                        exist or not, and it is not removed after this program"
-echo "                        exits. If not given, a temporary working directory is"
-echo "                        used instead"
-echo "  -o, --overlay"
-echo "                        directory to overlay on top of rootfs"
-echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
-echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
-echo "                        raw images are needed when QFIL or qdl flash tools are used"
+    echo "Builder for UbuntuCore for dragonboard"
+    echo ""
+    echo "positional arguments:"
+    echo "  model_assertion       Path to the model assertion file. This argument must"
+    echo "                        be given unless the state machine is being resumed, in"
+    echo "                        which case it cannot be given."
+    echo ""
+    echo "optional arguments:"
+    echo "  -h, --help            show this help message and exit"
+    echo "  --snap SNAP           Install an extra snap."
+    echo "                        This is passed through to 'snap prepare-image'. The snap argument can include"
+    echo "                        additional information about the channel and/or risk"
+    echo "                        with the following syntax: <snap>=<track|channel>"
+    echo "  --extra-snaps EXTRA_SNAPS"
+    echo "                        DEPRECATED (use --snap instead)."
+    echo "                        Extra snaps to install. This is passed through to"
+    echo "                        'snap prepare-image'."
+    echo "  -c CHANNEL, --channel CHANNEL"
+    echo "                        The snap channel to use"
+    echo ""
+    echo "Common options:"
+    echo "  --cloud-init USER-DATA-FILE"
+    echo "                        cloud-config data to be copied to the image"
+    echo "  --network-config NETWORK-CONFIG-FILE"
+    echo "                        Network config for cloud init"
+    echo "  --disable-console-conf"
+    echo "                        disable first boot console configuration"
+    echo "  --hooks-directory DIRECTORY"
+    echo "                        Path of directory in which scripts for build-time hooks will be located."
+    echo "  -O DIRECTORY, --output-dir DIRECTORY"
+    echo "                        The directory in which to put generated disk image"
+    echo "                        files."
+    echo "  -w DIRECTORY, --workdir DIRECTORY"
+    echo "                        The working directory in which to download and unpack"
+    echo "                        all the source files for the image. This directory can"
+    echo "                        exist or not, and it is not removed after this program"
+    echo "                        exits. If not given, a temporary working directory is"
+    echo "                        used instead"
+    echo "  -o, --overlay"
+    echo "                        directory to overlay on top of rootfs"
+    echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
+    echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
+    echo "                        raw images are needed when QFIL or qdl flash tools are used"
 }
 
+unset SNAPS
 unset EXTRA_SNAPS
 unset CHANNEL
 unset BOOTLOADER
 unset CUSTOM_OVERLAY
+unset DISABLE_CONSOLE_CONF
 while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
@@ -56,11 +65,21 @@ while [ "$1" != "" ]; do
             shift
             ;;
         --extra-snaps=*)
+            echo "DEPRECATED: --extra-snaps will removed, use --snap instead"
             EX_SNAP=$(echo $1 | awk -F= '{print $2}')
             EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${EX_SNAP}"
             ;;
         --extra-snaps)
+            echo "DEPRECATED: --extra-snaps will removed, use --snap instead"
             EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${2}"
+            shift
+            ;;
+        --snap=*)
+            EX_SNAP=$(echo $1 | awk -F= '{print $2}')
+            SNAPS="${SNAPS} --snap=${EX_SNAP}"
+            ;;
+        --snap)
+            SNAPS="${SNAPS} --snap=${2}"
             shift
             ;;
         -O | --output-dir)
@@ -98,6 +117,9 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
+        --disable-console-conf)
+            DISABLE_CONSOLE_CONF="true"
+            ;;
         -o | --overlay)
             if [ -n "$2" ] && [ -d $2 ]; then
                 CUSTOM_OVERLAY="$(readlink -f ${2})"
@@ -133,8 +155,8 @@ done
 # first do cleaning
 rm -rf ${builder_work_dir}
 
-echo "Running: snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
-snap prepare-image ${CHANNEL} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}
+echo "Running: snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
+snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}
 
 mkdir -p ${builder_work_dir}/root/system-data/
 if [ -d ${builder_work_dir}/image/boot/uboot ]; then
@@ -171,6 +193,11 @@ if [ -n "${HOOK_DIR}" ]; then
    if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
        UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
    fi
+fi
+
+if [ "true" == "${DISABLE_CONSOLE_CONF}" ]; then
+    mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
+    touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
 fi
 
 echo -e "\nCreating sparse image for writable"
