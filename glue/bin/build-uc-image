@@ -28,6 +28,8 @@ function print_usage {
     echo "                        The snap channel to use"
     echo ""
     echo "Common options:"
+    echo "  --netplan-config NETPLAN-CONFIG-FILE"
+    echo "                        Network config for netplan, should not be combined with --network-config"
     echo "  --cloud-init USER-DATA-FILE"
     echo "                        cloud-config data to be copied to the image"
     echo "  --network-config NETWORK-CONFIG-FILE"
@@ -88,6 +90,15 @@ while [ "$1" != "" ]; do
             ;;
         -w | --workdir)
             builder_work_dir="$2"
+            shift
+            ;;
+        --netplan-config)
+            if [ -n "$2" ] && [ -f $2 ]; then
+                NETPLAN_CONF="$2"
+            else
+                echo "wrong netplan config file was passed [ $2 ]"
+                exit
+            fi
             shift
             ;;
         --cloud-init)
@@ -156,7 +167,9 @@ done
 rm -rf ${builder_work_dir}
 
 echo "Running: snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
-snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}
+if ! snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}; then
+  exit
+fi
 
 mkdir -p ${builder_work_dir}/root/system-data/
 if [ -d ${builder_work_dir}/image/boot/uboot ]; then
@@ -184,6 +197,12 @@ if [ -n "${NETWORK_CONFIG}" ]; then
     echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
 fi
 
+if [ -n "${NETPLAN_CONF}" ]; then
+    echo -e "\nUsing passed netplan configuration: [${NETPLAN_CONF}]"
+    mkdir -p ${builder_work_dir}/root/system-data/etc/netplan
+    cp ${NETPLAN_CONF} ${builder_work_dir}/root/system-data/etc/netplan/00-snapd-config.yaml
+fi
+
 if [ -n "${HOOK_DIR}" ]; then
    echo -e "\nInvoking hooks"
    export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)"
@@ -200,25 +219,11 @@ if [ "true" == "${DISABLE_CONSOLE_CONF}" ]; then
     touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
 fi
 
-echo -e "\nCreating sparse image for writable"
-
-if [ "${BUILD_FULL_SIZE}" = "true" ]; then
-    echo "Calculating size available for writable partition"
-    # db410c storage is: 7818182656 bytes (15269854)
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
-#    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
-    echo "ROOT_SIZE=${ROOT_SIZE}"
-else
-    if [ "${BOOTLOADER}" = "uboot" ]; then
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
-    elif [ "${BOOTLOADER}" = "lk" ]; then
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/lk)" '{printf("%.0f",($1+sb+50))}')M
-    else
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
-    fi
+if [ "${BOOTLOADER}" == "uboot" ]; then
+    echo -e "\nCreating system-boot partition"
+    dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
+    mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
+    mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
 fi
 
 if [ -n "${CUSTOM_OVERLAY}" ];then
@@ -226,25 +231,71 @@ if [ -n "${CUSTOM_OVERLAY}" ];then
     cp -r ${CUSTOM_OVERLAY}/* ${builder_work_dir}/root
 fi
 
-echo "mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
-mkfs.ext4 -O -metadata_csum -T default -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
-echo -e "\nCreate sparse image for writable"
-echo "img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img"
-img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img
+# check if gadget has partition 'seed', for factory reset
+if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; then
+  echo -e "\nCreating seed partition instead of writable"
+  # copy back up files in root/boot
+  mkdir -p ${builder_work_dir}/root/boot
+  # copy only image files from gadget.yaml
+  BLOBS="$(grep 'image\:' ${builder_work_dir}/gadget/meta/gadget.yaml | awk '{print $3}')"
+  while IFS= read -r image
+  do
+      [ -e ${builder_work_dir}/gadget/blobs/${image} ] && cp -r ${builder_work_dir}/gadget/blobs/${image} ${builder_work_dir}/root/boot
+  done <<< "${BLOBS}"
 
-if [ "${BOOTLOADER}" = "uboot" ]; then
-    echo -e "\nCreating system-boot partition"
-    dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
-    mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
-    mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
+  if [ "${BOOTLOADER}" == "uboot" ]; then
+   dd if=${builder_work_dir}/system-boot.img bs=1024k | gzip -c > "${builder_work_dir}/root/boot/system-boot.img.gz"
+  else
+   cp ${builder_work_dir}/lk/* ${builder_work_dir}/root/boot
+  fi
+
+  [ -e "${builder_work_dir}/gadget/blobs/gpt_both0.bin" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/gpt_both0.bin"
+  [ -e "${builder_work_dir}/gadget/blobs/MBR_EMMC" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/MBR_EMMC"
+  ROOT_SIZE="$(sgdisk -p ${GPT_BIN} 2>&1 | grep seed | awk '{printf("%.0fM",($3-$2+1)/2048)}')"
+  echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
+  mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
+  echo -e "\nCreate sparse image for seed"
+  echo "img2simg ${builder_work_dir}/seed.raw ${builder_work_dir}/seed.img"
+  img2simg ${builder_work_dir}/seed.raw ${builder_work_dir}/seed.img
+else
+  echo -e "\nCreating sparse image for writable"
+
+  if [ "${BUILD_FULL_SIZE}" = "true" ]; then
+    echo "Calculating size available for writable partition"
+    # db410c storage is: 7818182656 bytes (15269854)
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
+    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
+   #    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
+    echo "ROOT_SIZE=${ROOT_SIZE}"
+  else
+    if [ "${BOOTLOADER}" = "uboot" ]; then
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+    elif [ "${BOOTLOADER}" = "lk" ]; then
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/lk)" '{printf("%.0f",($1+sb+50))}')M
+    else
+        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
+    fi
+  fi
+  echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
+  mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
+  echo -e "\nCreate sparse image for writable"
+  echo "img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img"
+  img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img
 fi
+
 
 mkdir -p ${builder_output}
 cp -r ${builder_work_dir}/gadget/blobs/* ${builder_output}/
 if [ "${KEEP_RAW}" = "true" ]; then
-    mv ${builder_work_dir}/writable.raw ${builder_output}/
+    [ -e ${builder_work_dir}/writable.raw ] && mv ${builder_work_dir}/writable.raw ${builder_output}/
+    [ -e ${builder_work_dir}/seed.raw ] && mv ${builder_work_dir}/seed.raw ${builder_output}/
 fi
-mv ${builder_work_dir}/writable.img ${builder_output}/
+
+[ -e ${builder_work_dir}/writable.img ] && mv ${builder_work_dir}/writable.img ${builder_output}/
+[ -e ${builder_work_dir}/seed.img ] &&  mv ${builder_work_dir}/seed.img ${builder_output}/
+
 if [ "${BOOTLOADER}" = "uboot" ]; then
     mv ${builder_work_dir}/system-boot.img ${builder_output}
 elif [ "${BOOTLOADER}" = "lk" ]; then
