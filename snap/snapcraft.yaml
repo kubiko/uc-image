@@ -19,7 +19,7 @@ layout:
 
 apps:
     build-uc-image:
-        command: bin/build-uc-image
+        command: usr/bin/fakeroot-sysv -- build-uc-image
         plugs:
             - home
             - mount-observe
@@ -48,6 +48,13 @@ parts:
       - squashfs-tools
       - dosfstools
       - gdisk
+      - fakeroot
+    override-build: |
+      sed -i \
+          -e 's|/usr/lib/|${SNAP}/usr/lib/|g' \
+          -e 's|FAKEROOT_PREFIX=|FAKEROOT_PREFIX=${SNAP}|g' \
+          -e 's|FAKEROOT_BINDIR=|FAKEROOT_BINDIR=${SNAP}|g' \
+          ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot-sysv
 
   glue:
     plugin: dump
