@@ -5,20 +5,17 @@ description: |
  toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
 
 confinement: strict
-passthrough:
 grade: stable
 
 environment:
     PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
     LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}"
-
-passthrough:
-  base: core18
-  layout:
-    /etc/mke2fs.conf:
-      bind-file: $SNAP_COMMON/etc/mke2fs.conf
-    /etc/mtools.conf:
-      bind-file: $SNAP_COMMON/etc/mtools.conf
+base: core18
+layout:
+  /etc/mke2fs.conf:
+    bind-file: $SNAP_COMMON/etc/mke2fs.conf
+  /etc/mtools.conf:
+    bind-file: $SNAP_COMMON/etc/mtools.conf
 
 apps:
     build-uc-image:
