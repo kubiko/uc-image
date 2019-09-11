@@ -36,6 +36,8 @@ function print_usage {
     echo "                        Network config for cloud init"
     echo "  --disable-console-conf"
     echo "                        disable first boot console configuration"
+    echo "  --auto-import-assertion  ASSERTION FILE"
+    echo "                        Assertion file to auto import"
     echo "  --hooks-directory DIRECTORY"
     echo "                        Path of directory in which scripts for build-time hooks will be located."
     echo "  -O DIRECTORY, --output-dir DIRECTORY"
@@ -94,7 +96,7 @@ while [ "$1" != "" ]; do
             ;;
         --netplan-config)
             if [ -n "$2" ] && [ -f $2 ]; then
-                NETPLAN_CONF="$2"
+                NETPLAN_CONF="$(readlink -f ${2})"
             else
                 echo "wrong netplan config file was passed [ $2 ]"
                 exit
@@ -103,7 +105,7 @@ while [ "$1" != "" ]; do
             ;;
         --cloud-init)
             if [ -n "$2" ] && [ -f $2 ]; then
-                CLOUD_INIT="$2"
+                CLOUD_INIT="$(readlink -f ${2})"
             else
                 echo "wrong cloud init user data file was passed [ $2 ]"
                 exit
@@ -112,7 +114,7 @@ while [ "$1" != "" ]; do
             ;;
         --hooks-directory)
             if [ -n "$2" ] && [ -d $2 ];then
-                HOOK_DIR="$2"
+                HOOK_DIR="$(readlink -f ${2})"
             else
                 echo "wrong hooks dir was passed [ $2 ]}"
                 exit
@@ -125,6 +127,15 @@ while [ "$1" != "" ]; do
             else
                 echo "wrong network config for cloud init was passed [ $2 ]"
                 exit
+            fi
+            shift
+            ;;
+        --auto-import-assertion)
+            if [ -n "$2" ] && [ -f $2 ]; then
+                 ASSERTION_IMPORT="$(readlink -f ${2})"
+            else
+                 echo "wrong assertion file to import was passed [ $2 ]"
+                 exit
             fi
             shift
             ;;
@@ -201,6 +212,11 @@ if [ -n "${NETPLAN_CONF}" ]; then
     echo -e "\nUsing passed netplan configuration: [${NETPLAN_CONF}]"
     mkdir -p ${builder_work_dir}/root/system-data/etc/netplan
     cp ${NETPLAN_CONF} ${builder_work_dir}/root/system-data/etc/netplan/00-snapd-config.yaml
+fi
+
+if [ -n "${ASSERTION_IMPORT}" ]; then
+    echo -e "\nImporting passed assertion file: [${ASSERTION_IMPORT}]"
+    cp ${ASSERTION_IMPORT} ${builder_work_dir}/root/auto-import.assert
 fi
 
 if [ -n "${HOOK_DIR}" ]; then
