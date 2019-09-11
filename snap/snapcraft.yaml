@@ -1,5 +1,5 @@
 name: dragonboard-builder
-version: "0.4.0"
+version: "0.4.1"
 summary: ubuntu core fastboot compatible image buider
 description: |
  toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
@@ -63,7 +63,6 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      [ ! -d /snap/core ] && snap install core
-      mkdir -p ${SNAPCRAFT_PART_INSTALL}/usr/bin
-      cp /snap/core/current/usr/bin/snap ${SNAPCRAFT_PART_INSTALL}/usr/bin
+      snap download snapd --edge
+      unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
