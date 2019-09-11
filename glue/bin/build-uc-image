@@ -9,6 +9,10 @@ export LD_LIBRARY_PATH=$SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH
 function print_usage {
     echo "Builder for UbuntuCore for dragonboard"
     echo ""
+    echo "Builder will use env variable DB_BUILDER_PATH as colon separated search paths when passed parameters"
+    echo "  are not provided with absolute or relative path. First successful find is used"
+    echo "  this search path is used for model assertions, snaps, network configs, auto-import-assertion, netplan-config"
+    echo ""
     echo "positional arguments:"
     echo "  model_assertion       Path to the model assertion file. This argument must"
     echo "                        be given unless the state machine is being resumed, in"
@@ -56,6 +60,41 @@ function print_usage {
     echo "                        raw images are needed when QFIL or qdl flash tools are used"
 }
 
+# if passed file does not exist, DB_BUILDER_PATH is used to search for it
+# first hit is used
+validate_file() {
+    local file=${1}
+    if [ -n "${file}" ]; then
+        if [ ! -e ${file} ]; then
+            # only use when we actually have search path
+            if [ -n "${DB_BUILDER_PATH}" ]; then
+                IFS=":"
+                for p in ${DB_BUILDER_PATH}
+                do
+                    if [ -e ${p}/${file} ]; then
+                        echo $(readlink -f ${p}/${file})
+                        return
+                    fi
+                done
+            fi
+        else
+            echo ${file}
+        fi
+    fi
+}
+
+# passed snap can be either snap name from store or local file
+validate_snap() {
+    local s="${1}"
+    if [ ${s: -4} == ".snap" ]; then
+        # check if local snap file exists
+        echo $(validate_file ${p})
+    else
+        # store snap
+        echo ${s}
+    fi
+}
+
 unset SNAPS
 unset EXTRA_SNAPS
 unset CHANNEL
@@ -80,10 +119,10 @@ while [ "$1" != "" ]; do
             ;;
         --snap=*)
             EX_SNAP=$(echo $1 | awk -F= '{print $2}')
-            SNAPS="${SNAPS} --snap=${EX_SNAP}"
+            SNAPS="${SNAPS} --snap=$(validate_snap ${EX_SNAP})"
             ;;
         --snap)
-            SNAPS="${SNAPS} --snap=${2}"
+            SNAPS="${SNAPS} --snap=$(validate_snap ${2})"
             shift
             ;;
         -O | --output-dir)
@@ -95,17 +134,19 @@ while [ "$1" != "" ]; do
             shift
             ;;
         --netplan-config)
-            if [ -n "$2" ] && [ -f $2 ]; then
-                NETPLAN_CONF="$(readlink -f ${2})"
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                NETPLAN_CONF="${f}"
             else
-                echo "wrong netplan config file was passed [ $2 ]"
+                echo "wrong netplan config file was passed [ ${2} ]"
                 exit
             fi
             shift
             ;;
         --cloud-init)
-            if [ -n "$2" ] && [ -f $2 ]; then
-                CLOUD_INIT="$(readlink -f ${2})"
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                CLOUD_INIT="${f}"
             else
                 echo "wrong cloud init user data file was passed [ $2 ]"
                 exit
@@ -122,8 +163,9 @@ while [ "$1" != "" ]; do
             shift
             ;;
         --network-config)
-            if [ -n "$2" ] && [ -f $2 ]; then
-                NETWORK_CONFIG="$(readlink -f ${2})"
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                NETWORK_CONFIG="${f}"
             else
                 echo "wrong network config for cloud init was passed [ $2 ]"
                 exit
@@ -131,8 +173,9 @@ while [ "$1" != "" ]; do
             shift
             ;;
         --auto-import-assertion)
-            if [ -n "$2" ] && [ -f $2 ]; then
-                 ASSERTION_IMPORT="$(readlink -f ${2})"
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                 ASSERTION_IMPORT="${f}"
             else
                  echo "wrong assertion file to import was passed [ $2 ]"
                  exit
@@ -162,8 +205,10 @@ while [ "$1" != "" ]; do
             KEEP_RAW="true"
             ;;
         *)
-            if [ -f $1 ]; then
-                MODEL_ASSERTION=$1
+            # check if this is model assertion
+            ma=$(validate_file ${1})
+            if [ -n "${ma}" ]; then
+                MODEL_ASSERTION=${ma}
             else
                 echo "Unknown parameter '$1'"
                 print_usage
