@@ -86,12 +86,12 @@ validate_file() {
 # passed snap can be either snap name from store or local file
 validate_snap() {
     local s="${1}"
-    if [ ${s: -4} == ".snap" ]; then
+    if [ "${s: -5}" = ".snap" ]; then
         # check if local snap file exists
-        echo $(validate_file ${p})
+        echo "$(validate_file ${s})"
     else
         # store snap
-        echo ${s}
+        echo "${s}"
     fi
 }
 
