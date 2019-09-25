@@ -362,5 +362,18 @@ if [ "${BOOTLOADER}" = "uboot" ]; then
 elif [ "${BOOTLOADER}" = "lk" ]; then
     cp ${builder_work_dir}/lk/* ${builder_output}/
 fi
-echo -e "\nOutput available in: '${builder_output}'"
 
+# create image manifest
+IMAGE_MANIFEST="${builder_output}/ubuntu-core-image.manifest"
+if [ -e ${builder_work_dir}/root/system-data/var/lib/snapd/seed/assertions/model ]; then
+    sed '1,/timestamp/!d' ${builder_work_dir}/root/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
+fi
+if [ -e ${builder_work_dir}/root/system-data/var/lib/snapd/seed/seed.yaml ]; then
+    sed -e '/snap-id:/d' \
+        -e '/contact:/d' \
+        -e 's/snaps:/seeded snaps:/g' \
+        -e 's/file:.*_\(.*\).snap/revision: \1/' \
+        ${builder_work_dir}/root/system-data/var/lib/snapd/seed/seed.yaml \
+      >> ${IMAGE_MANIFEST}
+fi
+echo -e "\nOutput available in: '${builder_output}'"
