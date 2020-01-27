@@ -55,6 +55,9 @@ function print_usage {
     echo "                        used instead"
     echo "  -o, --overlay"
     echo "                        directory to overlay on top of rootfs"
+    echo "                        !!! this option cannot be guaranteed !!!"
+    echo "                            use only on your own risk!"
+    echo "                            intended for device enablement phase"
     echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
     echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
     echo "                        raw images are needed when QFIL or qdl flash tools are used"
@@ -188,6 +191,7 @@ while [ "$1" != "" ]; do
         -o | --overlay)
             if [ -n "$2" ] && [ -d $2 ]; then
                 CUSTOM_OVERLAY="$(readlink -f ${2})"
+                echo "!!! This function is not guaranteed, use on own risk !!!"
             else
                 echo "wrong overlay directory passed [ $2 ]"
                 exit
