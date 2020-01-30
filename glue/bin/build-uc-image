@@ -1,6 +1,6 @@
 #!/bin/bash
 
-builder_work_dir="uc-db-builder-workdir"
+builder_work_dir="/tmp/uc-db-builder-workdir"
 builder_output="uc-db-build"
 export PATH="$SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/x86_64-linux-gnu:$SNAP/usr/lib/x86_64-linux-gnu"
@@ -295,6 +295,8 @@ if [ -n "${CUSTOM_OVERLAY}" ];then
     echo "Applying custom overlay"
     cp -r ${CUSTOM_OVERLAY}/* ${builder_work_dir}/root
 fi
+[ -e ${builder_output} ] && rm -rf ${builder_output}
+mkdir -p ${builder_output}
 
 # check if gadget has partition 'seed', for factory reset
 if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; then
@@ -320,8 +322,8 @@ if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; t
   echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
   mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for seed"
-  echo "img2simg ${builder_work_dir}/seed.raw ${builder_work_dir}/seed.img"
-  img2simg ${builder_work_dir}/seed.raw ${builder_work_dir}/seed.img
+  echo "img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img"
+  img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img
 else
   echo -e "\nCreating sparse image for writable"
 
@@ -346,20 +348,16 @@ else
   echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
   mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for writable"
-  echo "img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img"
-  img2simg ${builder_work_dir}/writable.raw ${builder_work_dir}/writable.img
+  echo "img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img"
+  img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img
 fi
 
 
-mkdir -p ${builder_output}
 cp -r ${builder_work_dir}/gadget/blobs/* ${builder_output}/
 if [ "${KEEP_RAW}" = "true" ]; then
     [ -e ${builder_work_dir}/writable.raw ] && mv ${builder_work_dir}/writable.raw ${builder_output}/
     [ -e ${builder_work_dir}/seed.raw ] && mv ${builder_work_dir}/seed.raw ${builder_output}/
 fi
-
-[ -e ${builder_work_dir}/writable.img ] && mv ${builder_work_dir}/writable.img ${builder_output}/
-[ -e ${builder_work_dir}/seed.img ] &&  mv ${builder_work_dir}/seed.img ${builder_output}/
 
 if [ "${BOOTLOADER}" = "uboot" ]; then
     mv ${builder_work_dir}/system-boot.img ${builder_output}
