@@ -61,6 +61,8 @@ function print_usage {
     echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
     echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
     echo "                        raw images are needed when QFIL or qdl flash tools are used"
+    echo " --journald-storage-persistent"
+    echo "                        use persistent storage for journald logs instead of default volatile settings"
 }
 
 # if passed file does not exist, DB_BUILDER_PATH is used to search for it
@@ -208,6 +210,9 @@ while [ "$1" != "" ]; do
         --keep-raw)
             KEEP_RAW="true"
             ;;
+        --journald-storage-persistent)
+            JOURNAL_STORAGE_PERSISTENT="true"
+            ;;
         *)
             # check if this is model assertion
             ma=$(validate_file ${1})
@@ -297,6 +302,11 @@ if [ -n "${CUSTOM_OVERLAY}" ];then
 fi
 [ -e ${builder_output} ] && rm -rf ${builder_output}
 mkdir -p ${builder_output}
+
+# check if device should be configured with persistent journal storage
+if [ "${JOURNAL_STORAGE_PERSISTENT}" == "true" ]; then
+    mkdir -p ${builder_work_dir}/root/system-data/var/log/journal
+fi
 
 # check if gadget has partition 'seed', for factory reset
 if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; then
