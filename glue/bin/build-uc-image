@@ -22,14 +22,14 @@ function print_usage {
     echo "  -h, --help            show this help message and exit"
     echo "  --snap SNAP           Install an extra snap."
     echo "                        This is passed through to 'snap prepare-image'. The snap argument can include"
-    echo "                        additional information about the channel and/or risk"
-    echo "                        with the following syntax: <snap>=<track|channel>"
-    echo "  --extra-snaps EXTRA_SNAPS"
-    echo "                        DEPRECATED (use --snap instead)."
-    echo "                        Extra snaps to install. This is passed through to"
-    echo "                        'snap prepare-image'."
+    echo "                        additional information about the track|risk channel/branch"
+    echo "                        with the following syntax: <snap>=<track|channel/branch>"
+    echo "                        examples: --snap go=1.14|stable"
+    echo "                                  --snap avahi.snap"
     echo "  -c CHANNEL, --channel CHANNEL"
-    echo "                        The snap channel to use"
+    echo "                        The snap channel to use, one of stable/candidate/beta/edge"
+    echo "                        stable channel is assumed if no channel is defined"
+    echo "                        example: -c edge"
     echo ""
     echo "Common options:"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
@@ -41,28 +41,40 @@ function print_usage {
     echo "  --disable-console-conf"
     echo "                        disable first boot console configuration"
     echo "  --auto-import-assertion  ASSERTION FILE"
-    echo "                        Assertion file to auto import"
+    echo "                        Auto import assertion file to be included in root of main writable partiton."
+    echo "                        This assertion is imported once system is fully seeded"
+    echo "                        Passed file does not need to have correct file name, it will be renamed"
     echo "  --hooks-directory DIRECTORY"
     echo "                        Path of directory in which scripts for build-time hooks will be located."
+    echo "                        see ubuntu-image help for more information"
     echo "  -O DIRECTORY, --output-dir DIRECTORY"
     echo "                        The directory in which to put generated disk image"
     echo "                        files."
     echo "  -w DIRECTORY, --workdir DIRECTORY"
     echo "                        The working directory in which to download and unpack"
-    echo "                        all the source files for the image. This directory can"
+    echo "                        all the source/snap files for the image. This directory can"
     echo "                        exist or not, and it is not removed after this program"
     echo "                        exits. If not given, a temporary working directory is"
-    echo "                        used instead"
+    echo "                        used instead under /tmp"
     echo "  -o, --overlay"
-    echo "                        directory to overlay on top of rootfs"
+    echo "                        Directory to overlay on top of rootfs"
     echo "                        !!! this option cannot be guaranteed !!!"
     echo "                            use only on your own risk!"
     echo "                            intended for device enablement phase"
-    echo " --full-size            writable partition is build to full size to occupy rest of the available space on storage"
-    echo " --keep-raw             keep raw writable image as well as sparse image used by fastboot"
-    echo "                        raw images are needed when QFIL or qdl flash tools are used"
+    echo " --full-size            Writable partition is build to full size to occupy rest of the available space on storage"
+    echo "                        This is usefull when writable partition should not be resized at first boot"
+    echo " --keep-raw             Keep raw writable image as well as sparse image used by fastboot"
+    echo "                        fastboot typically expects sparse image for ext4 partitions, to minimise size of the"
+    echo "                        image to be flashed."
+    echo "                        Raw images are needed when QFIL or qdl flash tools are used"
     echo " --journald-storage-persistent"
-    echo "                        use persistent storage for journald logs instead of default volatile settings"
+    echo "                        Configure system to use persistent storage for journald logs instead of default volatile settings"
+    echo " --disable-ssh-server"
+    echo "                        Disable system's ssh server from very beginning of the first boot"
+    echo " --seed-root-ssh-authorized-keys"
+    echo "                        populate root's authorized_keys (/root/.ssh/authorized_keys) with passed"
+    echo "                        public key(s)"
+    echo "                        example: --seed-root-ssh-authorized-keys <key 1> [key 2]"
 }
 
 # if passed file does not exist, DB_BUILDER_PATH is used to search for it
@@ -101,7 +113,6 @@ validate_snap() {
 }
 
 unset SNAPS
-unset EXTRA_SNAPS
 unset CHANNEL
 unset BOOTLOADER
 unset CUSTOM_OVERLAY
@@ -110,16 +121,6 @@ while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
             CHANNEL="--channel $2"
-            shift
-            ;;
-        --extra-snaps=*)
-            echo "DEPRECATED: --extra-snaps will removed, use --snap instead"
-            EX_SNAP=$(echo $1 | awk -F= '{print $2}')
-            EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${EX_SNAP}"
-            ;;
-        --extra-snaps)
-            echo "DEPRECATED: --extra-snaps will removed, use --snap instead"
-            EXTRA_SNAPS="${EXTRA_SNAPS} --extra-snaps=${2}"
             shift
             ;;
         --snap=*)
@@ -213,6 +214,25 @@ while [ "$1" != "" ]; do
         --journald-storage-persistent)
             JOURNAL_STORAGE_PERSISTENT="true"
             ;;
+        --disable-ssh-server)
+            DISABLE_SSH_SERVER="true"
+            ;;
+        --seed-root-ssh-authorized-keys)
+            # multiple keys can be passed, but at least one
+            while
+                f=$(validate_file ${2})
+                if [ -n "${f}" ] && [ -f ${f} ]; then
+                    SSH_PUB_KEY_FILES="${f} ${SSH_PUB_KEY_FILES}"
+                fi
+                shift
+                [ -z "${f}" ]
+            do true; done
+            # we need at least one pub key file
+            if [ -z "${SSH_PUB_KEY_FILES}" ]; then
+                echo "wrong ssh public key file was passed [ ${SSH_PUB_KEY_FILES} ]"
+                exit
+            fi
+            ;;
         *)
             # check if this is model assertion
             ma=$(validate_file ${1})
@@ -229,10 +249,14 @@ while [ "$1" != "" ]; do
 done
 
 # first do cleaning
-rm -rf ${builder_work_dir}
+if [ -d ${builder_work_dir} ]; then
+    echo "Cleaning old build directory [${builder_work_dir}]"
+    rm -rf ${builder_work_dir}
+fi
 
-echo "Running: snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
-if ! snap prepare-image ${CHANNEL} ${SNAPS} ${EXTRA_SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}; then
+echo "Running: snap prepare-image ${CHANNEL} ${SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
+if ! snap prepare-image ${CHANNEL} ${SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}; then
+  echo "snap prepare-image failed, bailing out"
   exit
 fi
 
@@ -284,15 +308,51 @@ if [ -n "${HOOK_DIR}" ]; then
    fi
 fi
 
-if [ "true" == "${DISABLE_CONSOLE_CONF}" ]; then
-    mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
-    touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
+if [ "true" = "${DISABLE_CONSOLE_CONF}" ]; then
+    echo -e "\nDisabling console conf"
+    # mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
+    # touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
+    mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/
+    mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/
+    ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/console-conf@.service
+    ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/serial-console-conf@.service
+    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
+    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conffi
 fi
 
-if [ "${BOOTLOADER}" == "uboot" ]; then
+# check if device should be configured with persistent journal storage
+if [ "${JOURNAL_STORAGE_PERSISTENT}" = "true" ]; then
+    echo -e "\nSwitching journald to use persistent storage"
+    mkdir -p ${builder_work_dir}/root/system-data/var/log/journal
+fi
+
+# check if system's ssh server should be disabled
+if [ "${DISABLE_SSH_SERVER}" = "true" ]; then
+    echo -e "\nDisabling system ssh server"
+    mkdir -p ${builder_work_dir}/root/system-data/etc/ssh
+    touch ${builder_work_dir}/root/system-data/etc/ssh/sshd_not_to_be_run
+fi
+
+# check if we should seed some public ssh keys
+if [ -n "${SSH_PUB_KEY_FILES}" ]; then
+    echo -e "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
+    SSH_DIR="${builder_work_dir}/root/system-data/root/.ssh"
+    mkdir -p ${SSH_DIR}
+    chmod 700 ${SSH_DIR}
+    AUTHORIZED_KEYS="${SSH_DIR}/authorized_keys"
+    for key in ${SSH_PUB_KEY_FILES}
+    do
+      if [ -f ${key} ]; then
+          cat ${key} >> ${AUTHORIZED_KEYS}
+      fi
+    done
+    chmod 600 ${AUTHORIZED_KEYS}
+fi
+
+if [ "${BOOTLOADER}" = "uboot" ]; then
     echo -e "\nCreating system-boot partition"
     dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
-    mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
+    fakeroot mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
     mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
 fi
 
@@ -300,13 +360,12 @@ if [ -n "${CUSTOM_OVERLAY}" ];then
     echo "Applying custom overlay"
     cp -r ${CUSTOM_OVERLAY}/* ${builder_work_dir}/root
 fi
-[ -e ${builder_output} ] && rm -rf ${builder_output}
-mkdir -p ${builder_output}
 
-# check if device should be configured with persistent journal storage
-if [ "${JOURNAL_STORAGE_PERSISTENT}" == "true" ]; then
-    mkdir -p ${builder_work_dir}/root/system-data/var/log/journal
+if [ -e ${builder_output} ]; then
+    echo "Cleaning output directory [${builder_output}]"
+    rm -rf ${builder_output}
 fi
+mkdir -p ${builder_output}
 
 # check if gadget has partition 'seed', for factory reset
 if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; then
@@ -320,7 +379,7 @@ if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; t
       [ -e ${builder_work_dir}/gadget/blobs/${image} ] && cp -r ${builder_work_dir}/gadget/blobs/${image} ${builder_work_dir}/root/boot
   done <<< "${BLOBS}"
 
-  if [ "${BOOTLOADER}" == "uboot" ]; then
+  if [ "${BOOTLOADER}" = "uboot" ]; then
    dd if=${builder_work_dir}/system-boot.img bs=1024k | gzip -c > "${builder_work_dir}/root/boot/system-boot.img.gz"
   else
    cp ${builder_work_dir}/lk/* ${builder_work_dir}/root/boot
@@ -329,8 +388,8 @@ if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; t
   [ -e "${builder_work_dir}/gadget/blobs/gpt_both0.bin" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/gpt_both0.bin"
   [ -e "${builder_work_dir}/gadget/blobs/MBR_EMMC" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/MBR_EMMC"
   ROOT_SIZE="$(sgdisk -p ${GPT_BIN} 2>&1 | grep seed | awk '{printf("%.0fM",($3-$2+1)/2048)}')"
-  echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
-  mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
+  echo "fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
+  fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for seed"
   echo "img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img"
   img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img
@@ -355,8 +414,8 @@ else
         ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
     fi
   fi
-  echo "mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
-  mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
+  echo "fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
+  fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for writable"
   echo "img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img"
   img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img
