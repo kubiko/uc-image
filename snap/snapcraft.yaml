@@ -1,5 +1,5 @@
 name: dragonboard-builder
-version: "0.4.6"
+version: "0.5.0"
 summary: ubuntu core fastboot compatible image buider
 description: |
  toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
@@ -24,6 +24,7 @@ apps:
             - home
             - mount-observe
             - network-observe
+            - ssh-public-keys
         adapter: none
 
 parts:
