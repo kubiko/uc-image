@@ -225,8 +225,7 @@ while [ "$1" != "" ]; do
                     SSH_PUB_KEY_FILES="${f} ${SSH_PUB_KEY_FILES}"
                 fi
                 shift
-                [ -z "${f}" ]
-            do true; done
+            do [ -z "${f}" ]; done
             # we need at least one pub key file
             if [ -z "${SSH_PUB_KEY_FILES}" ]; then
                 echo "wrong ssh public key file was passed [ ${SSH_PUB_KEY_FILES} ]"
@@ -317,7 +316,7 @@ if [ "true" = "${DISABLE_CONSOLE_CONF}" ]; then
     ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/console-conf@.service
     ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/serial-console-conf@.service
     echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
-    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conffi
+    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
 fi
 
 # check if device should be configured with persistent journal storage
