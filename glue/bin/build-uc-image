@@ -75,6 +75,11 @@ function print_usage {
     echo "                        populate root's authorized_keys (/root/.ssh/authorized_keys) with passed"
     echo "                        public key(s)"
     echo "                        example: --seed-root-ssh-authorized-keys <key 1> [key 2]"
+    echo "                        to enable early boot loggin, combine with use of --enable-early-getty"
+    echo " --enable-early-getty"
+    echo "                        Forcefull disabling of console conf and early enablement of getty"
+    echo "                        !!! Use this only for boot debugging, not suitable for production images"
+    echo "                        This option as consequence disables console-conf"
 }
 
 # if passed file does not exist, DB_BUILDER_PATH is used to search for it
@@ -117,6 +122,7 @@ unset CHANNEL
 unset BOOTLOADER
 unset CUSTOM_OVERLAY
 unset DISABLE_CONSOLE_CONF
+unset ENABLE_EARLY_GETTY
 while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
@@ -232,6 +238,9 @@ while [ "$1" != "" ]; do
                 exit
             fi
             ;;
+        --enable-early-getty)
+            ENABLE_EARLY_GETTY="true"
+            ;;
         *)
             # check if this is model assertion
             ma=$(validate_file ${1})
@@ -309,8 +318,12 @@ fi
 
 if [ "true" = "${DISABLE_CONSOLE_CONF}" ]; then
     echo -e "\nDisabling console conf"
-    # mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
-    # touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
+    mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
+    touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
+fi
+
+if [ "true" = "${ENABLE_EARLY_GETTY}" ]; then
+    echo -e "\nEnabling early getty"
     mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/
     mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/
     ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/console-conf@.service
