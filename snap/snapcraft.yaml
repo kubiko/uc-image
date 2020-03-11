@@ -1,5 +1,5 @@
 name: dragonboard-builder
-version: "0.5.1"
+version: "0.5.2"
 summary: ubuntu core fastboot compatible image buider
 description: |
  toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
@@ -19,7 +19,7 @@ layout:
 
 apps:
     build-uc-image:
-        command: bin/build-uc-image
+        command: usr/bin/fakeroot-sysv -- build-uc-image
         plugs:
             - home
             - mount-observe
@@ -56,7 +56,7 @@ parts:
           -e 's|FAKEROOT_PREFIX=|FAKEROOT_PREFIX=${SNAP}|g' \
           -e 's|FAKEROOT_BINDIR=|FAKEROOT_BINDIR=${SNAP}|g' \
           ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot-sysv
-          ln -sf fakeroot-sysv ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot
+      ln -sf fakeroot-sysv ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot
 
   glue:
     plugin: dump

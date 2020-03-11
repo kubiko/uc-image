@@ -5,6 +5,7 @@ builder_output="uc-db-build"
 export PATH="$SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/x86_64-linux-gnu:$SNAP/usr/lib/x86_64-linux-gnu"
 export LD_LIBRARY_PATH=$SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH
+unset FAKEROOT
 
 function print_usage {
     echo "Builder for UbuntuCore for dragonboard"
@@ -80,6 +81,9 @@ function print_usage {
     echo "                        Forcefull disabling of console conf and early enablement of getty"
     echo "                        !!! Use this only for boot debugging, not suitable for production images"
     echo "                        This option as consequence disables console-conf"
+    echo " --set-hostname HOSTNAME"
+    echo "                        Set initial hostname to be used at first boot"
+    echo "                        !!! This feature is not guarteed as it's using image overlay"
 }
 
 # if passed file does not exist, DB_BUILDER_PATH is used to search for it
@@ -123,10 +127,11 @@ unset BOOTLOADER
 unset CUSTOM_OVERLAY
 unset DISABLE_CONSOLE_CONF
 unset ENABLE_EARLY_GETTY
+unset HOSTNAME
 while [ "$1" != "" ]; do
     case $1 in
         -c | --channel)
-            CHANNEL="--channel $2"
+            CHANNEL="--channel ${2}"
             shift
             ;;
         --snap=*)
@@ -138,11 +143,11 @@ while [ "$1" != "" ]; do
             shift
             ;;
         -O | --output-dir)
-            builder_output="$2"
+            builder_output="${2}"
             shift
             ;;
         -w | --workdir)
-            builder_work_dir="$2"
+            builder_work_dir="${2}"
             shift
             ;;
         --netplan-config)
@@ -150,7 +155,7 @@ while [ "$1" != "" ]; do
             if [ -n "${f}" ] && [ -f ${f} ]; then
                 NETPLAN_CONF="${f}"
             else
-                echo "wrong netplan config file was passed [ ${2} ]"
+                echo -e "wrong netplan config file was passed [ ${2} ]"
                 exit
             fi
             shift
@@ -160,7 +165,7 @@ while [ "$1" != "" ]; do
             if [ -n "${f}" ] && [ -f ${f} ]; then
                 CLOUD_INIT="${f}"
             else
-                echo "wrong cloud init user data file was passed [ $2 ]"
+                echo -e "wrong cloud init user data file was passed [ ${2} ]"
                 exit
             fi
             shift
@@ -169,7 +174,7 @@ while [ "$1" != "" ]; do
             if [ -n "$2" ] && [ -d $2 ];then
                 HOOK_DIR="$(readlink -f ${2})"
             else
-                echo "wrong hooks dir was passed [ $2 ]}"
+                echo -e "wrong hooks dir was passed [ ${2} ]"
                 exit
             fi
             shift
@@ -179,7 +184,7 @@ while [ "$1" != "" ]; do
             if [ -n "${f}" ] && [ -f ${f} ]; then
                 NETWORK_CONFIG="${f}"
             else
-                echo "wrong network config for cloud init was passed [ $2 ]"
+                echo -e "wrong network config for cloud init was passed [ ${2} ]"
                 exit
             fi
             shift
@@ -189,7 +194,7 @@ while [ "$1" != "" ]; do
             if [ -n "${f}" ] && [ -f ${f} ]; then
                  ASSERTION_IMPORT="${f}"
             else
-                 echo "wrong assertion file to import was passed [ $2 ]"
+                 echo -e "wrong assertion file to import was passed [ ${2} ]"
                  exit
             fi
             shift
@@ -198,11 +203,11 @@ while [ "$1" != "" ]; do
             DISABLE_CONSOLE_CONF="true"
             ;;
         -o | --overlay)
-            if [ -n "$2" ] && [ -d $2 ]; then
+            if [ -n "${2}" ] && [ -d ${2} ]; then
                 CUSTOM_OVERLAY="$(readlink -f ${2})"
                 echo "!!! This function is not guaranteed, use on own risk !!!"
             else
-                echo "wrong overlay directory passed [ $2 ]"
+                echo -e "wrong overlay directory passed [ ${2} ]"
                 exit
             fi
             shift
@@ -240,6 +245,14 @@ while [ "$1" != "" ]; do
             ;;
         --enable-early-getty)
             ENABLE_EARLY_GETTY="true"
+            ;;
+        --set-hostname)
+            if [ -n "${2}" ]; then
+               HOSTNAME="${2}"
+            else
+               echo -e "Missing hostname parameter"
+            fi
+            shift
             ;;
         *)
             # check if this is model assertion
@@ -345,6 +358,13 @@ if [ "${DISABLE_SSH_SERVER}" = "true" ]; then
     touch ${builder_work_dir}/root/system-data/etc/ssh/sshd_not_to_be_run
 fi
 
+# check if we should set default hostname
+if [ -n "${HOSTNAME}" ]; then
+    echo -e "\nSetting initial hostname to [ ${HOSTNAME} ]"
+    mkdir -p ${builder_work_dir}/root/system-data/etc/
+    echo ${HOSTNAME} > ${builder_work_dir}/root/system-data/etc/hostname
+fi
+
 # check if we should seed some public ssh keys
 if [ -n "${SSH_PUB_KEY_FILES}" ]; then
     echo -e "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
@@ -364,7 +384,7 @@ fi
 if [ "${BOOTLOADER}" = "uboot" ]; then
     echo -e "\nCreating system-boot partition"
     dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
-    fakeroot mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
+    ${FAKEROOT} mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
     mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
 fi
 
@@ -400,8 +420,8 @@ if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; t
   [ -e "${builder_work_dir}/gadget/blobs/gpt_both0.bin" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/gpt_both0.bin"
   [ -e "${builder_work_dir}/gadget/blobs/MBR_EMMC" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/MBR_EMMC"
   ROOT_SIZE="$(sgdisk -p ${GPT_BIN} 2>&1 | grep seed | awk '{printf("%.0fM",($3-$2+1)/2048)}')"
-  echo "fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
-  fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
+  echo "${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
+  ${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for seed"
   echo "img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img"
   img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img
@@ -426,8 +446,8 @@ else
         ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
     fi
   fi
-  echo "fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
-  fakeroot mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
+  echo "${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
+  ${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
   echo -e "\nCreate sparse image for writable"
   echo "img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img"
   img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img
