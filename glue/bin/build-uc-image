@@ -1,18 +1,23 @@
 #!/bin/bash
+# this can be used to validate if there is newer version available
+SCRIPT_VERSION=1.2
 
-builder_work_dir="/tmp/uc-db-builder-workdir"
-builder_output="uc-db-build"
-export PATH="$SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/x86_64-linux-gnu:$SNAP/usr/lib/x86_64-linux-gnu"
-export LD_LIBRARY_PATH=$SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH
-unset FAKEROOT
+unset BUILDER_CONFIG
+declare -A BUILDER_CONFIG
 
-function print_usage {
-    echo "Builder for UbuntuCore for dragonboard"
-    echo ""
-    echo "Builder will use env variable DB_BUILDER_PATH as colon separated search paths when passed parameters"
-    echo "  are not provided with absolute or relative path. First successful find is used"
-    echo "  this search path is used for model assertions, snaps, network configs, auto-import-assertion, netplan-config"
+BUILDER_CONFIG["OUTPUT_DIR"]="uc-db-build"
+BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
+BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
+# delete all logs
+rm $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-*
+BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
+[ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
+[ -z "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
+[ -z "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=${DB_BUILDER_OUTPUT_DIR}
+
+# print help
+print_help () {
+    echo "Builder for UbuntuCore for images supporting fastboot like flash tool"
     echo ""
     echo "positional arguments:"
     echo "  model_assertion       Path to the model assertion file. This argument must"
@@ -31,6 +36,7 @@ function print_usage {
     echo "                        The snap channel to use, one of stable/candidate/beta/edge"
     echo "                        stable channel is assumed if no channel is defined"
     echo "                        example: -c edge"
+    echo "  -d, --debug           print debug"
     echo ""
     echo "Common options:"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
@@ -84,18 +90,161 @@ function print_usage {
     echo " --set-hostname HOSTNAME"
     echo "                        Set initial hostname to be used at first boot"
     echo "                        !!! This feature is not guarteed as it's using image overlay"
+    echo " --build-recovery-seed"
+    echo "                        Build only seed partition image which can be used for"
+    echo "                        - update of factory image on device"
+    echo "                        - device reflash through factory reset process"
+    echo "                        created seed.img image is not sparse image, so it cannot be used with fastboot"
+    echo "                        seed image also contains other partition to be reflashed during factory reset"
+    echo " -v|--version"
+    echo "                        print version of the script"
+    echo ""
+    echo "Builder supports default settings passed through environment variables"
+    echo "Supported env variables:"
+    echo "    DB_BUILDER_PATH:       Colon separated search paths to use to search for passed file parameters"
+    echo "                           if not provided with absolute or relative path."
+    echo "                           First successful find is used."
+    echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion, netplan-config"
+    echo "    DB_BUILDER_DEBUG:      Default log level"
+    echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
+    echo "    DB_BUILDER_WORK_DIR:   Default work directory to be used"
+    echo "                           If not defined or passed as param, tmp directory is created"
+    echo "    DB_BUILDER_OUTPUT_DIR: Default output directory"
+    echo "                           If not defined or passed as param, 'uc-db-build' directory will be created in current directory"
 }
 
-# if passed file does not exist, DB_BUILDER_PATH is used to search for it
+# normalize version
+normalize_version () {
+   echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }'
+}
+
+# provision macOS
+provision_macOS_system () {
+  if [ -n "$(uname -a | grep Darwin)" ]; then
+    ## building on macOS, check if dependencies are installed
+
+    # first check brew cellars, required cellars: e2fsprogs, simg2img, squashfs, dosfstools
+    if [ ! -f "$(which brew)" ]; then
+      echo "This system has no brew installed. There is no way to install dependencies required for image building"
+      echo "see https://brew.sh"
+      exit 0
+    fi
+    echo -e "\nChecking system dependencies"
+    # brew list is very slow, so check for files instead
+    declare -A UC_BUILD_DEPENDENCIES
+    UC_BUILD_DEPENDENCIES["e2fsprogs"]="mkfs.ext4"
+    UC_BUILD_DEPENDENCIES["simg2img"]="img2simg"
+    UC_BUILD_DEPENDENCIES["squashfs"]="mksquashfs"
+    UC_BUILD_DEPENDENCIES["dosfstools"]="mkfs.vfat"
+    UC_BUILD_DEPENDENCIES["fakeroot"]="fakeroot"
+
+    for pckg in "${!UC_BUILD_DEPENDENCIES[@]}"
+    do
+      if [ ! -f "$(which  ${UC_BUILD_DEPENDENCIES[${pckg}]})" ]; then
+        echo -e "installing brew cellar ${pckg}"
+        # brew install ${pckg}
+      fi
+    done
+
+    # check if we have snap client binary
+    if [ ! ${HOME}/bin/snap ]; then
+      echo "Downloadig snap client...."
+      mkdir -p ${HOME}/bin
+      wget https://people.canonical.com/~okubik/snap.macOS -o ${HOME}/bin/snap
+      chmod +x ${HOME}/bin/snap
+      echo "Downloaded version of snap client:"
+      snap version
+    fi
+
+    BUILDER_CONFIG["FAKEROOT"]="fakeroot "
+
+    # update script if there is never version
+    local people_url="https://people.canonical.com/~okubik/build-uc-image"
+    local latest_version=$(curl -s ${people_url} | grep SCRIPT_VERSION= | head -n1 | awk -F '=' '{print $2}')
+    if [ $(normalize_version ${SCRIPT_VERSION}) -ge $(normalize_version ${latest_version}) ]; then
+      echo -e "Script version is up to date\n"
+    else
+      echo -e "!!! Script is outdated, download new one from ${people_url} !!!\n"
+      exit 0
+    fi
+  fi
+}
+
+# print debug log
+print_debug () {
+  local level=${1}
+  shift
+  [ "${BUILDER_CONFIG["BUILDER_DEBUG"]}" -ge "${level}" ] && echo -e "$@"
+  # if work dir does not exist yet, log to tmp log file
+  if [ -e "${BUILDER_CONFIG["TMP_LOG_FILE"]}" ]; then
+    echo -e "$@" >> ${BUILDER_CONFIG["TMP_LOG_FILE"]}
+  else
+    echo -e "$@" >> ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
+}
+
+# print builder config if debug log
+print_builder_config () {
+  if [ "${BUILDER_CONFIG["BUILDER_DEBUG"]}" -ge "2" ]; then
+    print_debug 1 "Builder configuration:"
+    for i in "${!BUILDER_CONFIG[@]}"; do
+      print_debug 1 "\t$i = ${BUILDER_CONFIG[$i]}"
+    done
+    # print empty line
+    echo ""
+  fi
+}
+
+# prepare work directory
+prepare_work_directory () {
+  # first clean previus tmp directories
+  rm -rf $(dirname $(mktemp -u -d -t uc-db-workdir-XXXXX))/uc-db-workdir-*
+  # if work directory is not defined, use tmp one
+  if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
+    # work dir not defined create tmp one
+    BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-db-workdir-XXXX)
+    print_debug 2 "Creating temp work directory"
+  else
+    # make sure dir exists
+    if [ -d ${BUILDER_CONFIG["WORK_DIR"]} ]; then
+        print_debug 2 "Cleaning old build directory [${BUILDER_CONFIG["WORK_DIR"]}]"
+        rm -rf ${BUILDER_CONFIG["WORK_DIR"]}
+    fi
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}
+  fi
+}
+
+# determine bootloader type
+determine_bootloader () {
+  mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+  if [  -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ]; then
+    BUILDER_CONFIG["BOOTLOADER"]="uboot"
+    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
+    cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
+  elif [ -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ]; then
+    BUILDER_CONFIG["BOOTLOADER"]="lk"
+    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
+  else
+    print_debug 0 "Unrecognised bootloader, existing"
+    exit 0
+  fi
+  mv ${BUILDER_CONFIG["WORK_DIR"]}/image/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+  print_debug 1 "\nDetected bootloader: ${BUILDER_CONFIG["BOOTLOADER"]}"
+}
+
+# validate passed parameter is file
+# if passed string is not file with relative/absolute path
+# BUILDER_CONFIG["SEARCH_PATH"] variable is used as search path to look for the file
 # first hit is used
-validate_file() {
+# function returns absolute path to the file if file is validated or none
+validate_file () {
     local file=${1}
     if [ -n "${file}" ]; then
         if [ ! -e ${file} ]; then
             # only use when we actually have search path
-            if [ -n "${DB_BUILDER_PATH}" ]; then
+            if [ -n "${BUILDER_CONFIG["SEARCH_PATH"]}" ]; then
                 IFS=":"
-                for p in ${DB_BUILDER_PATH}
+                for p in ${BUILDER_CONFIG["SEARCH_PATH"]}
                 do
                     if [ -e ${p}/${file} ]; then
                         echo $(readlink -f ${p}/${file})
@@ -104,13 +253,15 @@ validate_file() {
                 done
             fi
         else
-            echo ${file}
+            echo $(readlink -f ${file})
         fi
     fi
 }
 
+# validate passed snap
 # passed snap can be either snap name from store or local file
-validate_snap() {
+# function return either snap name or absolute path to snap file
+validate_snap () {
     local s="${1}"
     if [ "${s: -5}" = ".snap" ]; then
         # check if local snap file exists
@@ -121,254 +272,209 @@ validate_snap() {
     fi
 }
 
-unset SNAPS
-unset CHANNEL
-unset BOOTLOADER
-unset CUSTOM_OVERLAY
-unset DISABLE_CONSOLE_CONF
-unset ENABLE_EARLY_GETTY
-unset HOSTNAME
-while [ "$1" != "" ]; do
-    case $1 in
-        -c | --channel)
-            CHANNEL="--channel ${2}"
-            shift
-            ;;
-        --snap=*)
-            EX_SNAP=$(echo $1 | awk -F= '{print $2}')
-            SNAPS="${SNAPS} --snap=$(validate_snap ${EX_SNAP})"
-            ;;
-        --snap)
-            SNAPS="${SNAPS} --snap=$(validate_snap ${2})"
-            shift
-            ;;
-        -O | --output-dir)
-            builder_output="${2}"
-            shift
-            ;;
-        -w | --workdir)
-            builder_work_dir="${2}"
-            shift
-            ;;
-        --netplan-config)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                NETPLAN_CONF="${f}"
-            else
-                echo -e "wrong netplan config file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --cloud-init)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                CLOUD_INIT="${f}"
-            else
-                echo -e "wrong cloud init user data file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --hooks-directory)
-            if [ -n "$2" ] && [ -d $2 ];then
-                HOOK_DIR="$(readlink -f ${2})"
-            else
-                echo -e "wrong hooks dir was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --network-config)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                NETWORK_CONFIG="${f}"
-            else
-                echo -e "wrong network config for cloud init was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --auto-import-assertion)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                 ASSERTION_IMPORT="${f}"
-            else
-                 echo -e "wrong assertion file to import was passed [ ${2} ]"
-                 exit
-            fi
-            shift
-            ;;
-        --disable-console-conf)
-            DISABLE_CONSOLE_CONF="true"
-            ;;
-        -o | --overlay)
-            if [ -n "${2}" ] && [ -d ${2} ]; then
-                CUSTOM_OVERLAY="$(readlink -f ${2})"
-                echo "!!! This function is not guaranteed, use on own risk !!!"
-            else
-                echo -e "wrong overlay directory passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --full-size)
-            BUILD_FULL_SIZE="true"
-            ;;
-        --help | -h)
-            print_usage
-            exit
-            ;;
-        --keep-raw)
-            KEEP_RAW="true"
-            ;;
-        --journald-storage-persistent)
-            JOURNAL_STORAGE_PERSISTENT="true"
-            ;;
-        --disable-ssh-server)
-            DISABLE_SSH_SERVER="true"
-            ;;
-        --seed-root-ssh-authorized-keys)
-            # multiple keys can be passed, but at least one
-            while
-                f=$(validate_file ${2})
-                if [ -n "${f}" ] && [ -f ${f} ]; then
-                    SSH_PUB_KEY_FILES="${f} ${SSH_PUB_KEY_FILES}"
-                fi
-                shift
-            do [ -z "${f}" ]; done
-            # we need at least one pub key file
-            if [ -z "${SSH_PUB_KEY_FILES}" ]; then
-                echo "wrong ssh public key file was passed [ ${SSH_PUB_KEY_FILES} ]"
-                exit
-            fi
-            ;;
-        --enable-early-getty)
-            ENABLE_EARLY_GETTY="true"
-            ;;
-        --set-hostname)
-            if [ -n "${2}" ]; then
-               HOSTNAME="${2}"
-            else
-               echo -e "Missing hostname parameter"
-            fi
-            shift
-            ;;
-        *)
-            # check if this is model assertion
-            ma=$(validate_file ${1})
-            if [ -n "${ma}" ]; then
-                MODEL_ASSERTION=${ma}
-            else
-                echo "Unknown parameter '$1'"
-                print_usage
-                exit
-            fi
-            ;;
-    esac
-    shift
-done
+# parse passed yaml string
+# function return formated yaml with tags
+parse_yaml () {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|,$s\]$s\$|]|" \
+        -e ":1;s|^\($s\)\($w\)$s:$s\[$s\(.*\)$s,$s\(.*\)$s\]|\1\2: [\3]\n\1  - \4|;t1" \
+        -e "s|^\($s\)\($w\)$s:$s\[$s\(.*\)$s\]|\1\2:\n\1  - \3|;p" $1 | \
+   sed -ne "s|,$s}$s\$|}|" \
+        -e ":1;s|^\($s\)-$s{$s\(.*\)$s,$s\($w\)$s:$s\(.*\)$s}|\1- {\2}\n\1  \3: \4|;t1" \
+        -e    "s|^\($s\)-$s{$s\(.*\)$s}|\1-\n\1  \2|;p" | \
+   sed -ne "s|^\($s\):|\1|" \
+        -e "s|^\($s\)-$s[\"']\(.*\)[\"']$s\$|\1$fs$fs\2|p" \
+        -e "s|^\($s\)-$s\(.*\)$s\$|\1$fs$fs\2|p" \
+        -e "s|^\($s\)\($w\)$s:$s[\"']\(.*\)[\"']$s\$|\1$fs\2$fs\3|p" \
+        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p" | \
+   awk -F$fs '{
+      indent = length($1)/2;
+      vname[indent] = $2;
+      for (i in vname) {if (i > indent) {delete vname[i]; idx[i]=0}}
+      if(length($2)== 0){  vname[indent]= ++idx[indent] };
+      if (length($3) > 0) {
+         vn=""; for (i=0; i<indent; i++) { vn=(vn)(vname[i])("_")}
+         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, vname[indent], $3);
+      }
+   }'
+}
 
-# first do cleaning
-if [ -d ${builder_work_dir} ]; then
-    echo "Cleaning old build directory [${builder_work_dir}]"
-    rm -rf ${builder_work_dir}
-fi
+##
+# Populate defined partition as defined in gadget.yaml
+# parameters:
+#   - gadget yaml file
+#   - partition label in gadget to populate
+#   - directory with unpacked gadget
+#   - target directory to copy blobs
+populate_partition () {
+  local gadget_yaml=${1}
+  local part_label=${2}
+  local gadget_dir=${3}
+  local target_dir=${4}
+  print_debug 1 "\npopulate_partition: [${1}, ${2}, ${3}, ${4}]"
+  # parse through gadget.yaml and populate seed as defined
+  part_seed=$(parse_yaml ${gadget_yaml} | grep "seed" | awk -F '=' '{print $1}')
+  parse_yaml ${gadget_yaml} | grep "${part_seed}_content" | awk -F "__" '{print $2}' | sed 's/\"//g' | while read line
+  do
+    # if ":" it's source, if '=' it's target
+    [ -n "$(echo ${line} | grep ":")" ] && source=$(echo ${line} | awk -F "source: " '{print $2}')
+    [ -n "$(echo ${line} | grep "=")" ] && target=$(echo ${line} | awk -F "target=" '{print $2}')
+    if [ -n "${source}" ] && [ -n "${target}" ]; then
+      print_debug 3 "\tcp ${gadget_dir}/${source} ${target_dir}/${target}"
+      cp ${gadget_dir}/${source} ${target_dir}/${target}
+      unset source target
+    fi
+  done
+}
 
-echo "Running: snap prepare-image ${CHANNEL} ${SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}"
-if ! snap prepare-image ${CHANNEL} ${SNAPS} ${MODEL_ASSERTION} ${builder_work_dir}; then
-  echo "snap prepare-image failed, bailing out"
-  exit
-fi
+# backup bootloader related files
+# those are used when factory reset is performed
+backup_bootloader_files () {
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
+    # in uboot case we gzip entire system-boot partition
+    dd if=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024k | gzip -c > "${BUILDER_CONFIG["WORK_DIR"]}/root/boot/system-boot.img.gz"
+  elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
+    # for lk bootloader we should have boot environment + boot image
+    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* ${BUILDER_CONFIG["WORK_DIR"]}/root/boot
+    # also create file for backup snapbootsel environment
+    [ -f ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin ] && \
+        cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin \
+           ${BUILDER_CONFIG["WORK_DIR"]}/root/boot/snapbootselbak.bin
+  fi
+}
 
-mkdir -p ${builder_work_dir}/root/system-data/
-if [ -d ${builder_work_dir}/image/boot/uboot ]; then
-    BOOTLOADER="uboot"
-    mv ${builder_work_dir}/image/boot/uboot ${builder_work_dir}/system-boot
-    cp -r ${builder_work_dir}/gadget/blobs ${builder_work_dir}/system-boot/
-elif [ -d ${builder_work_dir}/image/boot/lk ]; then
-    BOOTLOADER="lk"
-    mv ${builder_work_dir}/image/boot/lk ${builder_work_dir}/lk
-fi
-mv ${builder_work_dir}/image/* ${builder_work_dir}/root/system-data/
+# normalise passed size to kilo bytes
+# passed size can be in Kilo(K|k), Mega(M|m), Giga(G\g) bytes
+# if not specified value is assumed in bytes
+normalise_size_to_kb () {
+  local size=${1}
+  case $size in
+     (0)  size="0" ;;
+     (*G | *g) size=$(expr $(echo $size | sed -e 's/G//g' -e 's/g//g') \* 1024 \* 1024) ;;
+     (*M | *m) size=$(expr $(echo $size | sed -e 's/M//g' -e 's/m//g') \* 1024) ;;
+     (*K | *k) size=$(echo $size | sed -e 's/K//g' -e 's/k//g') ;;
+     (*) size=$(expr $size / 1024) ;;
+  esac
+  echo ${size}
+}
 
+# seed cloud init user_data
+# if no cloud init user data is passed do nothing
+seed_cloud_init_user_data () {
+  if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ]; then
+    print_debug 1 "\nUsing passed cloud init user data configuration: [${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}]"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/user-data
+    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
+  fi
+}
 
-if [ -n "${CLOUD_INIT}" ]; then
-    echo -e "\nUsing passed cloud init user data configuration: [${CLOUD_INIT}]"
-    mkdir -p ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${CLOUD_INIT} ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/user-data
-    echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
-fi
+# seed cloud init network config
+# if no cloud init network config is passed do nothing
+seed_cloud_init_net_config () {
+  if [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ]; then
+    print_debug 1 "\nUsing passed cloud init network configuration: [${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}]"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/network-config
+    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
+  fi
+}
 
-if [ -n "${NETWORK_CONFIG}" ]; then
-    echo -e "\nUsing passed cloud init network configuration: [${NETWORK_CONFIG}]"
-    mkdir -p ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${NETWORK_CONFIG} ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/network-config
-    echo "instance-id: nocloud-static" > ${builder_work_dir}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
-fi
+# seed netplan network config if provided
+# if no netplan config is passed do nothing
+seed_netplan_config () {
+  if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ]; then
+    print_debug 1 "\nUsing passed netplan configuration: [${BUILDER_CONFIG["NETPLAN_CONF"]}]"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/netplan
+    cp ${BUILDER_CONFIG["NETPLAN_CONF"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/netplan/00-snapd-config.yaml
+  fi
+}
 
-if [ -n "${NETPLAN_CONF}" ]; then
-    echo -e "\nUsing passed netplan configuration: [${NETPLAN_CONF}]"
-    mkdir -p ${builder_work_dir}/root/system-data/etc/netplan
-    cp ${NETPLAN_CONF} ${builder_work_dir}/root/system-data/etc/netplan/00-snapd-config.yaml
-fi
+# seed passed assertion as auto import assertion
+# one assertion can be passed
+# if no assertion is passed do nothing
+seed_auto_import_assertion () {
+  if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
+    print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
+    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/auto-import.assert
+  fi
+}
 
-if [ -n "${ASSERTION_IMPORT}" ]; then
-    echo -e "\nImporting passed assertion file: [${ASSERTION_IMPORT}]"
-    cp ${ASSERTION_IMPORT} ${builder_work_dir}/root/auto-import.assert
-fi
+# invoke custom hooks if provided
+# if no hook directory is passed do nothing
+invoke_hooks () {
+  if [ -n "${HOOK_DIR}" ]; then
+    print_debug 1 "\nInvoking hooks"
+    export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)"
+    if [ -f ${HOOK_DIR}/post-populate-rootfs ]; then
+      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)" ${HOOK_DIR}/post-populate-rootfs
+    fi
+    if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
+      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
+    fi
+  fi
+}
 
-if [ -n "${HOOK_DIR}" ]; then
-   echo -e "\nInvoking hooks"
-   export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)"
-   if [ -f ${HOOK_DIR}/post-populate-rootfs ]; then
-      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)" ${HOOK_DIR}/post-populate-rootfs
-   fi
-   if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
-       UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${builder_work_dir}/root)" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
-   fi
-fi
+# disable console conf if requested
+# if disable console conf is not requested, do nothing
+disable_console_conf () {
+  if [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ]; then
+    print_debug 1 "\nDisabling console conf"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/console-conf
+    touch ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/console-conf/complete
+  fi
+}
 
-if [ "true" = "${DISABLE_CONSOLE_CONF}" ]; then
-    echo -e "\nDisabling console conf"
-    mkdir -p ${builder_work_dir}/root/system-data/var/lib/console-conf
-    touch ${builder_work_dir}/root/system-data/var/lib/console-conf/complete
-fi
-
-if [ "true" = "${ENABLE_EARLY_GETTY}" ]; then
-    echo -e "\nEnabling early getty"
-    mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/
-    mkdir -p ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/
-    ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/console-conf@.service
-    ln -s /dev/null ${builder_work_dir}/root/system-data/etc/systemd/system/serial-console-conf@.service
-    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
-    echo -e "[Service]\nExecStartPre=" > ${builder_work_dir}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
-fi
+# enable early getty if requested
+# if no early getty is not requested, do nothing
+enable_early_getty () {
+  if [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ]; then
+    print_debug 1 "\nEnabling early getty"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-getty@.service.d/
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/getty@.service.d/
+    ln -s /dev/null ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/console-conf@.service
+    ln -s /dev/null ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-console-conf@.service
+    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
+    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
+  fi
+}
 
 # check if device should be configured with persistent journal storage
-if [ "${JOURNAL_STORAGE_PERSISTENT}" = "true" ]; then
-    echo -e "\nSwitching journald to use persistent storage"
-    mkdir -p ${builder_work_dir}/root/system-data/var/log/journal
-fi
+# if no persistent journal is passed do nothing
+enable_persisten_journal () {
+  if [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ]; then
+    print_debug 1 "\nSwitching journald to use persistent storage"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/log/journal
+  fi
+}
 
 # check if system's ssh server should be disabled
-if [ "${DISABLE_SSH_SERVER}" = "true" ]; then
-    echo -e "\nDisabling system ssh server"
-    mkdir -p ${builder_work_dir}/root/system-data/etc/ssh
-    touch ${builder_work_dir}/root/system-data/etc/ssh/sshd_not_to_be_run
-fi
+# if disable ssh server is not requested do nothing
+disable_ssh_server () {
+  if [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ]; then
+    print_debug 1 "\nDisabling system ssh server"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/ssh
+    touch ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/ssh/sshd_not_to_be_run
+  fi
+}
 
 # check if we should set default hostname
-if [ -n "${HOSTNAME}" ]; then
-    echo -e "\nSetting initial hostname to [ ${HOSTNAME} ]"
-    mkdir -p ${builder_work_dir}/root/system-data/etc/
-    echo ${HOSTNAME} > ${builder_work_dir}/root/system-data/etc/hostname
-fi
+# if no hostname is passed do nothing
+seed_hostname () {
+  if [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ]; then
+    print_debug 1 "\nSetting initial hostname to [ ${BUILDER_CONFIG["HOSTNAME"]} ]"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/
+    echo ${BUILDER_CONFIG["HOSTNAME"]} > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/hostname
+  fi
+}
 
-# check if we should seed some public ssh keys
-if [ -n "${SSH_PUB_KEY_FILES}" ]; then
-    echo -e "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
-    SSH_DIR="${builder_work_dir}/root/system-data/root/.ssh"
+# check if we should seed authorized ssh kyes for root user
+# if no root authorised keys are passed do nothing
+seed_root_authorized_keys () {
+  if [ -n "${SSH_PUB_KEY_FILES}" ]; then
+    print_debug 1 "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
+    SSH_DIR="${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/root/.ssh"
     mkdir -p ${SSH_DIR}
     chmod 700 ${SSH_DIR}
     AUTHORIZED_KEYS="${SSH_DIR}/authorized_keys"
@@ -379,104 +485,390 @@ if [ -n "${SSH_PUB_KEY_FILES}" ]; then
       fi
     done
     chmod 600 ${AUTHORIZED_KEYS}
-fi
+  fi
+}
 
-if [ "${BOOTLOADER}" = "uboot" ]; then
-    echo -e "\nCreating system-boot partition"
-    dd if=/dev/zero of=${builder_work_dir}/system-boot.img bs=1024 count=131072
-    ${FAKEROOT} mkfs.vfat -s 1 -S 512 -F 32 -n 'system-boot' ${builder_work_dir}/system-boot.img
-    mcopy -s -i ${builder_work_dir}/system-boot.img ${builder_work_dir}/system-boot/* ::
-fi
+# Apply custom overlay if there are some
+# if no custom overlay is passed do nothing
+seed_custom_overlay () {
+  if [ -n "${BUILDER_CONFIG["CUSTOM_OVERLAY"]}" ];then
+    print_debug 1 "Applying custom overlay"
+    cp -r ${BUILDER_CONFIG["CUSTOM_OVERLAY"]}/* ${BUILDER_CONFIG["WORK_DIR"]}/root
+  fi
+}
 
-if [ -n "${CUSTOM_OVERLAY}" ];then
-    echo "Applying custom overlay"
-    cp -r ${CUSTOM_OVERLAY}/* ${builder_work_dir}/root
-fi
+# create system-boot partition if needed
+create_system_boot_partition_image () {
+  # u-boot bootloader is using dedicated 'system-boot' partition
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
+      print_debug 1 "\nCreating system-boot partition"
+      dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=131072
+      ${BUILDER_CONFIG["FAKEROOT"]}mkfs.vfat \
+          -s 1 \
+          -S 512 \
+          -F 32 \
+          -n 'system-boot' \
+          ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+      mcopy \
+          -s \
+          -i ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img \
+          ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/* :: 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
+}
 
-if [ -e ${builder_output} ]; then
-    echo "Cleaning output directory [${builder_output}]"
-    rm -rf ${builder_output}
-fi
-mkdir -p ${builder_output}
-
-# check if gadget has partition 'seed', for factory reset
-if [ -n "$(grep 'name\: seed' ${builder_work_dir}/gadget/meta/gadget.yaml)" ]; then
-  echo -e "\nCreating seed partition instead of writable"
+# create seed partition image
+create_seed_partition_image () {
+  print_debug 1 "\nCreating seed partition image"
   # copy back up files in root/boot
-  mkdir -p ${builder_work_dir}/root/boot
-  # copy only image files from gadget.yaml
-  BLOBS="$(grep 'image\:' ${builder_work_dir}/gadget/meta/gadget.yaml | awk '{print $3}')"
-  while IFS= read -r image
-  do
-      [ -e ${builder_work_dir}/gadget/blobs/${image} ] && cp -r ${builder_work_dir}/gadget/blobs/${image} ${builder_work_dir}/root/boot
-  done <<< "${BLOBS}"
 
-  if [ "${BOOTLOADER}" = "uboot" ]; then
-   dd if=${builder_work_dir}/system-boot.img bs=1024k | gzip -c > "${builder_work_dir}/root/boot/system-boot.img.gz"
-  else
-   cp ${builder_work_dir}/lk/* ${builder_work_dir}/root/boot
+  # seed partition has boot directory with backed up boot files
+  mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/boot
+  # parse through gadget.yaml and populate seed as defined there
+  populate_partition \
+          ${gadget_yaml} \
+          "seed" \
+          ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
+          ${BUILDER_CONFIG["WORK_DIR"]}/root
+
+  # backup bootloader related files
+  backup_bootloader_files
+
+  seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: seed" | awk -F "=" '{print $1}')
+  seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
+  SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${SEED_SIZE}"
+  ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
+      -O \
+      -metadata_csum \
+      -T default \
+      -E root_owner=0:0 \
+      -O uninit_bg \
+      -L seed \
+      -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
+      ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  # if we are not building recovery seed, convert image to sparse
+  if [ ! "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ]; then
+    print_debug 1 "\nCreate sparse image for seed"
+    print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/seed.img"
+    img2simg \
+       ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
+       ${BUILDER_CONFIG["OUTPUT_DIR"]}/seed.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
+}
+
+# create writable partition image
+create_writable_partition_image () {
+  # root partition is "writable"
+  print_debug 1 "\nCreating image for writable"
+
+  if [ "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ]; then
+    print_debug 0 "Gadget snap has not defined seed partition!!"
+    print_debug 0 "--build-recovery-seed option is not compatible with used gadget snap"
+    exit 0
   fi
 
-  [ -e "${builder_work_dir}/gadget/blobs/gpt_both0.bin" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/gpt_both0.bin"
-  [ -e "${builder_work_dir}/gadget/blobs/MBR_EMMC" ] && GPT_BIN="${builder_work_dir}/gadget/blobs/MBR_EMMC"
-  ROOT_SIZE="$(sgdisk -p ${GPT_BIN} 2>&1 | grep seed | awk '{printf("%.0fM",($3-$2+1)/2048)}')"
-  echo "${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}"
-  ${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${builder_work_dir}/root ${builder_work_dir}/seed.raw ${ROOT_SIZE}
-  echo -e "\nCreate sparse image for seed"
-  echo "img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img"
-  img2simg ${builder_work_dir}/seed.raw ${builder_output}/seed.img
-else
-  echo -e "\nCreating sparse image for writable"
+  # parse through gadget.yaml and populate writable as defined
+  populate_partition \
+          ${gadget_yaml} \
+          "writable" \
+          ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
+          ${BUILDER_CONFIG["WORK_DIR"]}/root
 
-  if [ "${BUILD_FULL_SIZE}" = "true" ]; then
-    echo "Calculating size available for writable partition"
+  if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
+    print_debug 1 "Calculating size available for writable partition"
     # db410c storage is: 7818182656 bytes (15269854)
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
-    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
-   #    ROOT_SIZE="$(sgdisk -p ${builder_work_dir}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
-    echo "ROOT_SIZE=${ROOT_SIZE}"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
+   # ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
+    print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   else
-    if [ "${BOOTLOADER}" = "uboot" ]; then
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
-    elif [ "${BOOTLOADER}" = "lk" ]; then
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk -v sb="$(du -sh ${builder_work_dir}/lk)" '{printf("%.0f",($1+sb+50))}')M
+    # make root size bigger by what be needed for boot backup
+    if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+    elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/lk)" '{printf("%.0f",($1+sb+50))}')M
     else
-        ROOT_SIZE=$(du -sh ${builder_work_dir}/root/ | awk '{printf("%.0f",($1+50))}')M
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk '{printf("%.0f",($1+50))}')M
     fi
   fi
-  echo "${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}"
-  ${FAKEROOT} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${builder_work_dir}/root ${builder_work_dir}/writable.raw ${ROOT_SIZE}
-  echo -e "\nCreate sparse image for writable"
-  echo "img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img"
-  img2simg ${builder_work_dir}/writable.raw ${builder_output}/writable.img
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${ROOT_SIZE}"
+  ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
+      -O \
+      -metadata_csum \
+      -T default \
+      -E root_owner=0:0 \
+      -O uninit_bg \
+      -L writable \
+      -d ${BUILDER_CONFIG["WORK_DIR"]}/root \
+      ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
+      ${ROOT_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  print_debug 1 "\nCreate sparse image for writable"
+  print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img"
+  img2simg \
+      ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
+      ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+}
+
+# generate image manifest
+generate_manifest () {
+  # create image manifest
+  local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
+  if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/assertions/model ]; then
+      sed '1,/timestamp/!d' ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
+  fi
+  if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/seed.yaml ]; then
+      sed -e '/snap-id:/d' \
+          -e '/contact:/d' \
+          -e 's/snaps:/seeded snaps:/g' \
+          -e 's/file:.*_\(.*\).snap/revision: \1/' \
+          ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/seed.yaml \
+        >> ${IMAGE_MANIFEST}
+  fi
+}
+
+# parse passed parameters
+while [ "$1" != "" ]; do
+    case $1 in
+        -c | --channel)
+            BUILDER_CONFIG["CHANNEL"]="--channel ${2}"
+            shift
+            ;;
+        --snap=*)
+            EX_SNAP=$(echo ${1} | awk -F= '{print $2}')
+            BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${EX_SNAP})"
+            ;;
+        --snap)
+            BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
+            shift
+            ;;
+        -O | --output-dir)
+            BUILDER_CONFIG["OUTPUT_DIR"]="${2}"
+            shift
+            ;;
+        -w | --workdir)
+            BUILDER_CONFIG["WORK_DIR"]="${2}"
+            shift
+            ;;
+        --netplan-config)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                BUILDER_CONFIG["NETPLAN_CONF"]="${f}"
+            else
+                print_debug 0 "wrong netplan config file was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
+        --cloud-init)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]="${f}"
+            else
+                print_debug 0 "wrong cloud init user data file was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
+        --hooks-directory)
+            if [ -n "$2" ] && [ -d $2 ];then
+                HOOK_DIR="$(readlink -f ${2})"
+            else
+                print_debug 0 "wrong hooks dir was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
+        --network-config)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]="${f}"
+            else
+                print_debug 0 "wrong network config for cloud init was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
+        --auto-import-assertion)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                 BUILDER_CONFIG["ASSERTION_IMPORT"]="${f}"
+            else
+                 print_debug 0 "wrong assertion file to import was passed [ ${2} ]"
+                 exit
+            fi
+            shift
+            ;;
+        --disable-console-conf)
+            BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]="true"
+            ;;
+        -o | --overlay)
+            if [ -n "${2}" ] && [ -d ${2} ]; then
+                BUILDER_CONFIG["CUSTOM_OVERLAY"]="$(readlink -f ${2})"
+                print_debug 0 "!!! This function is not guaranteed, use on own risk !!!"
+            else
+                print_debug 0 "wrong overlay directory passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
+        --full-size)
+            BUILDER_CONFIG["BUILD_FULL_SIZE"]="true"
+            ;;
+        --help | -h)
+            print_help
+            exit
+            ;;
+        --keep-raw)
+            BUILDER_CONFIG["KEEP_RAW"]="true"
+            ;;
+        --build-recovery-seed)
+            BUILDER_CONFIG["RECOVERY_SEED"]="true"
+            # copy raw image as output
+            BUILDER_CONFIG["KEEP_RAW"]="true"
+            ;;
+        --journald-storage-persistent)
+            BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]="true"
+            ;;
+        --disable-ssh-server)
+            BUILDER_CONFIG["DISABLE_SSH_SERVER"]="true"
+            ;;
+        --seed-root-ssh-authorized-keys)
+            # multiple keys can be passed, but at least one
+            while
+                f=$(validate_file ${2})
+                if [ -n "${f}" ] && [ -f ${f} ]; then
+                    SSH_PUB_KEY_FILES="${f} ${SSH_PUB_KEY_FILES}"
+                else
+                    break
+                fi
+                shift
+            do [ -z "${f}" ]; done
+            # we need at least one pub key file
+            if [ -z "${SSH_PUB_KEY_FILES}" ]; then
+                print_debug 0 "wrong ssh public key file was passed [ ${SSH_PUB_KEY_FILES} ]"
+                exit
+            fi
+            ;;
+        --enable-early-getty)
+            BUILDER_CONFIG["ENABLE_EARLY_GETTY"]="true"
+            ;;
+        --set-hostname)
+            if [ -n "${2}" ]; then
+               BUILDER_CONFIG["HOSTNAME"]="${2}"
+            else
+               print_debug 0 "Missing hostname parameter"
+            fi
+            shift
+            ;;
+        -d | --debug)
+            BUILDER_CONFIG["BUILDER_DEBUG"]=3
+            ;;
+        -v | --version)
+            echo -e "version: ${SCRIPT_VERSION}"
+            exit 0
+            ;;
+        *)
+            # check if this is model assertion
+            ma=$(validate_file ${1})
+            if [ -n "${ma}" ]; then
+                BUILDER_CONFIG["MODEL_ASSERTION"]=${ma}
+            else
+                print_debug 0 "Unknown parameter '$1'"
+                print_help
+                exit
+            fi
+            ;;
+    esac
+    shift
+done
+
+# make sure system is ready
+provision_macOS_system
+
+# first create or clean work directory
+prepare_work_directory
+
+print_builder_config
+
+# run snap prepare image with all known parameters
+print_debug 1 "Running: snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}; then
+  print_debug 0 "snap prepare-image failed, bailing out"
+  exit
+fi
+
+# merge logs
+mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+# determine bootloader
+determine_bootloader
+
+# updated seeded image per passed configurations
+    # seed cloud init user_data if provided
+    seed_cloud_init_user_data
+    # seed cloud init network config if provided
+    seed_cloud_init_net_config
+    # seed netplan network config if provided
+    seed_netplan_config
+    # seed auto import assertion if provided
+    seed_auto_import_assertion
+    # invoke custom hooks if provided
+    invoke_hooks
+    # disable console conf if requested
+    disable_console_conf
+    # enable early getty if requested
+    enable_early_getty
+    # check if device should be configured with persistent journal storage
+    enable_persisten_journal
+    # check if system's ssh server should be disabled
+    disable_ssh_server
+    # check if we should set default hostname
+    seed_hostname
+    # check if we should seed authorized ssh kyes for root user
+    seed_root_authorized_keys
+    # Apply custom overlay if there are some
+    seed_custom_overlay
+
+# create system boot if needed
+create_system_boot_partition_image
+
+# prepare output directory
+if [ -e ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
+    print_debug 2 "Cleaning output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}]"
+    rm -rf ${BUILDER_CONFIG["OUTPUT_DIR"]}
+fi
+mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
+
+gadget_yaml="${BUILDER_CONFIG["WORK_DIR"]}/gadget/meta/gadget.yaml"
+# check if gadget has partition 'seed', for factory reset
+if [ "seed" = "$(parse_yaml ${gadget_yaml} \
+                  | grep -E "volumes\_.*\"name\: seed" \
+                  | sed 's/\"//g' | awk '{print $2}')" ]; then
+  # creating seed partition image
+  create_seed_partition_image
+else
+  # create write partition image
+  create_writable_partition_image
 fi
 
 
-cp -r ${builder_work_dir}/gadget/blobs/* ${builder_output}/
-if [ "${KEEP_RAW}" = "true" ]; then
-    [ -e ${builder_work_dir}/writable.raw ] && mv ${builder_work_dir}/writable.raw ${builder_output}/
-    [ -e ${builder_work_dir}/seed.raw ] && mv ${builder_work_dir}/seed.raw ${builder_output}/
+if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ]; then
+    [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] && mv ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    [ -e ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ] && mv ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/
 fi
 
-if [ "${BOOTLOADER}" = "uboot" ]; then
-    mv ${builder_work_dir}/system-boot.img ${builder_output}
-elif [ "${BOOTLOADER}" = "lk" ]; then
-    cp ${builder_work_dir}/lk/* ${builder_output}/
+# copy gadget blobs files if making normal release
+if [ ! "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ]; then
+  cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/* ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
+      mv ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img ${BUILDER_CONFIG["OUTPUT_DIR"]}
+  elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
+      cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+  fi
 fi
 
 # create image manifest
-IMAGE_MANIFEST="${builder_output}/ubuntu-core-image.manifest"
-if [ -e ${builder_work_dir}/root/system-data/var/lib/snapd/seed/assertions/model ]; then
-    sed '1,/timestamp/!d' ${builder_work_dir}/root/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
-fi
-if [ -e ${builder_work_dir}/root/system-data/var/lib/snapd/seed/seed.yaml ]; then
-    sed -e '/snap-id:/d' \
-        -e '/contact:/d' \
-        -e 's/snaps:/seeded snaps:/g' \
-        -e 's/file:.*_\(.*\).snap/revision: \1/' \
-        ${builder_work_dir}/root/system-data/var/lib/snapd/seed/seed.yaml \
-      >> ${IMAGE_MANIFEST}
-fi
-echo -e "\nOutput available in: '${builder_output}'"
+generate_manifest
+
+print_debug 0 "\nOutput available in: '${BUILDER_CONFIG["OUTPUT_DIR"]}'"
