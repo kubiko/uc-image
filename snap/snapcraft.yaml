@@ -31,8 +31,6 @@ parts:
   tools:
     plugin: nil
     stage-packages:
-      - libc6
-      - libc-bin
       - e2fsprogs
       - libfdisk1
       - libuuid1
