@@ -1,8 +1,9 @@
 name: dragonboard-builder
-version: "0.6.5"
-summary: ubuntu core fastboot compatible image buider
+version: "0.6.6"
+summary: Custom ubuntu core image buider
 description: |
- toolset to build emmc ubuntu core images for dragonboard flashable with fastboot
+ Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
+ Created images can be used with tools like fastboot, uuu(mfgtools)
 
 confinement: strict
 grade: stable
