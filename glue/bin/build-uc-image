@@ -9,11 +9,16 @@ BUILDER_CONFIG["OUTPUT_DIR"]="uc-db-build"
 BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
 BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
 # delete all logs
-rm $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-*
+rm $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
 [ -z "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
 [ -z "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=${DB_BUILDER_OUTPUT_DIR}
+
+# boot assets candidate directories in gadget snap
+BOOT_ASSETS_CANDIDATES="blobs boot-assets"
+unset BOOT_ASSETS
+
 
 # print help
 print_help () {
@@ -74,6 +79,7 @@ print_help () {
     echo "                        fastboot typically expects sparse image for ext4 partitions, to minimise size of the"
     echo "                        image to be flashed."
     echo "                        Raw images are needed when QFIL or qdl flash tools are used"
+    echo " --build-raw            Build raw image, instead of sparse one"
     echo " --journald-storage-persistent"
     echo "                        Configure system to use persistent storage for journald logs instead of default volatile settings"
     echo " --disable-ssh-server"
@@ -137,6 +143,7 @@ provision_macOS_system () {
     UC_BUILD_DEPENDENCIES["squashfs"]="mksquashfs"
     UC_BUILD_DEPENDENCIES["dosfstools"]="mkfs.vfat"
     UC_BUILD_DEPENDENCIES["fakeroot"]="fakeroot"
+    UC_BUILD_DEPENDENCIES["mtools"]="mcopy"
 
     for pckg in "${!UC_BUILD_DEPENDENCIES[@]}"
     do
@@ -216,11 +223,19 @@ prepare_work_directory () {
 
 # determine bootloader type
 determine_bootloader () {
+  # determine boot assets dir
+  for ba in ${BOOT_ASSETS_CANDIDATES}
+  do
+    if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${ba} ]; then
+      BOOT_ASSETS=${ba}
+      continue
+    fi
+  done
   mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
   if [  -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ]; then
     BUILDER_CONFIG["BOOTLOADER"]="uboot"
     mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
-    cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
+    cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS} ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
   elif [ -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ]; then
     BUILDER_CONFIG["BOOTLOADER"]="lk"
     mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
@@ -577,11 +592,11 @@ create_writable_partition_image () {
   if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
     print_debug 1 "Calculating size available for writable partition"
     # db410c storage is: 7818182656 bytes (15269854)
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
-   # ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
+    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
+   # ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
     print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   else
     # make root size bigger by what be needed for boot backup
@@ -604,11 +619,13 @@ create_writable_partition_image () {
       -d ${BUILDER_CONFIG["WORK_DIR"]}/root \
       ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
       ${ROOT_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  print_debug 1 "\nCreate sparse image for writable"
-  print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img"
-  img2simg \
-      ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
-      ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  if [ "${BUILDER_CONFIG["BUILD_RAW"]}" != "true" ]; then
+      print_debug 1 "\nCreate sparse image for writable"
+      print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img"
+      img2simg \
+          ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
+          ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
 }
 
 # generate image manifest
@@ -722,6 +739,9 @@ while [ "$1" != "" ]; do
             ;;
         --keep-raw)
             BUILDER_CONFIG["KEEP_RAW"]="true"
+            ;;
+        --build-raw)
+            BUILDER_CONFIG["BUILD_RAW"]="true"
             ;;
         --build-recovery-seed)
             BUILDER_CONFIG["RECOVERY_SEED"]="true"
@@ -853,14 +873,14 @@ else
 fi
 
 
-if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ]; then
+if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ] || [ "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ]; then
     [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] && mv ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/
     [ -e ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ] && mv ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/
 fi
 
-# copy gadget blobs files if making normal release
+# copy gadget boot assets files if making normal release
 if [ ! "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ]; then
-  cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/* ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+  cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/* ${BUILDER_CONFIG["OUTPUT_DIR"]}/
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
       mv ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img ${BUILDER_CONFIG["OUTPUT_DIR"]}
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
