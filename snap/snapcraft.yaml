@@ -1,5 +1,5 @@
 name: dragonboard-builder
-version: "0.6.6"
+version: "0.6.7"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -10,8 +10,10 @@ grade: stable
 
 environment:
     PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$PATH
-    LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}"
+    LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}/android
+
 base: core18
+
 layout:
   /etc/mke2fs.conf:
     bind-file: $SNAP_COMMON/etc/mke2fs.conf
