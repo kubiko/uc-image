@@ -1,5 +1,5 @@
 name: dragonboard-builder
-version: "0.6.7"
+version: "0.7.0"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.

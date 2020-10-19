@@ -28,13 +28,14 @@ BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
 rm $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
-[ -z "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
-[ -z "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(readlink -f ${DB_BUILDER_OUTPUT_DIR})
+[ -n "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
+[ -n "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(readlink -f ${DB_BUILDER_OUTPUT_DIR})
 
 # boot assets candidate directories in gadget snap
 BOOT_ASSETS_CANDIDATES="blobs boot-assets"
 unset BOOT_ASSETS
 
+SNAP_REQUIRED_INTERFACES="home mount-observe network-observe ssh-public-keys"
 
 # print help
 print_help () {
@@ -60,6 +61,7 @@ print_help () {
     echo "  -d, --debug           print debug"
     echo ""
     echo "Common options:"
+    echo "!!! Not all options are available when building Ubuntu Core 20 image!!!"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
     echo "                        Network config for netplan, should not be combined with --network-config"
     echo "  --cloud-init USER-DATA-FILE"
@@ -193,6 +195,38 @@ provision_macOS_system () {
   fi
 }
 
+# check snaps interfaces are connected before progressing
+check_snap_environment () {
+  # are we even running in snap confinement
+  if [ -z "$(env | grep SNAP_INSTANCE_NAME)" ]; then
+    echo "Detected non snap environment execution (running unconfined)"
+    return
+  fi
+  # ensure we have all the interfaces connected
+  local missing_connections=""
+  for plug in ${SNAP_REQUIRED_INTERFACES}
+  do
+    if ! snapctl is-connected ${plug}; then
+      missing_connections="${missing_connections}${plug} "
+    fi
+  done
+
+  if [ -n "${missing_connections}" ]; then
+    echo "Snap does not have connected plugs required for its function, please connected them"
+    echo "By running:"
+    for p in ${missing_connections}
+    do
+      echo -e "\t$ snap connect ${SNAP_INSTANCE_NAME}:${p}"
+    done
+    exit 0
+  fi
+  # check we are not running as root
+  if [ "$USER" =  "root" ]; then
+    echo "Please do not run with sudo, no need for this"
+    exit 0
+  fi
+}
+
 # print debug log
 print_debug () {
   local level=${1}
@@ -237,8 +271,19 @@ prepare_work_directory () {
   fi
 }
 
+# dtermine if we are building for UC20
+determine_uc2x() {
+  print_debug 3 "determine_uc2x"
+  if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ] \
+     || [ -n "$(grep 'base: core20' ${BUILDER_CONFIG["WORK_DIR"]}/system-seed/systems/*/model 2> /dev/null)" ]; then
+    print_debug 2 "Target Ubuntu Core 20+ detected"
+    BUILDER_CONFIG["UC20"]="true"
+  fi
+}
+
 # determine bootloader type
 determine_bootloader () {
+  print_debug 3 "determine_bootloader"
   # determine boot assets dir
   for ba in ${BOOT_ASSETS_CANDIDATES}
   do
@@ -247,15 +292,22 @@ determine_bootloader () {
       continue
     fi
   done
-  mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+  # UC20 behaves differently from UC16/18
+  if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+    local seed_root="system-seed"
+  else
+    local seed_root="image"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+  fi
+
   # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
-  if [  -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ]; then
+  if [  -d ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/uboot ]; then
     BUILDER_CONFIG["BOOTLOADER"]="uboot"
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
+    mv ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
     cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS} ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
-  elif [ -d ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ]; then
+  elif [ -d ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/lk ]; then
     BUILDER_CONFIG["BOOTLOADER"]="lk"
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
+    mv ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
     # check if this is amboot special case
     if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/amboot ]; then
       # set some configuratoon for amboot case
@@ -266,7 +318,10 @@ determine_bootloader () {
     print_debug 0 "Unrecognised bootloader, existing"
     exit 0
   fi
-  mv ${BUILDER_CONFIG["WORK_DIR"]}/image/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+
+  if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+  fi
   print_debug 1 "\nDetected bootloader: ${BUILDER_CONFIG["BOOTLOADER"]}"
 }
 
@@ -571,9 +626,9 @@ create_seed_partition_image () {
   # backup bootloader related files
   backup_bootloader_files
 
-  seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: seed" | awk -F "=" '{print $1}')
-  seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
-  SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
+  local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: seed" | awk -F "=" '{print $1}')
+  local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
+  local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
   print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${SEED_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
@@ -616,10 +671,10 @@ create_writable_partition_image () {
   if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
     print_debug 1 "Calculating size available for writable partition"
     # db410c storage is: 7818182656 bytes (15269854)
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
-    ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
+    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
+    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
+    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
+    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
    # ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
     print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   else
@@ -650,6 +705,32 @@ create_writable_partition_image () {
           ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
           ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   fi
+}
+
+# create UC20 seed partition image
+create_uc20_seed_partition_image () {
+  print_debug 1 "\nCreating UC20 seed partition image"
+
+  # calculate seed size from gadget.yaml
+  local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: ubuntu-seed" | awk -F "=" '{print $1}')
+  local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
+  local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ubuntu-seed -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ${SEED_SIZE}"
+  ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
+      -O \
+      -metadata_csum \
+      -T default \
+      -E root_owner=0:0 \
+      -O uninit_bg \
+      -L ubuntu-seed \
+      -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
+      ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  # if we are not building recovery seed, convert image to sparse
+  print_debug 1 "\nCreate sparse image for Ubuntu seed"
+  print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img"
+  img2simg \
+     ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
+     ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
 }
 
 copy_release_files () {
@@ -701,6 +782,8 @@ run_amba_image_build () {
   # as expected by amba image builder
   ln -sf boot.img \
          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/kernel.bin
+  ln -sf boot.img \
+         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/secondary.bin
   ln -sf snapbootsel.bin \
          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/snapbootselbak.bin
 
@@ -893,6 +976,9 @@ done
 # make sure system is ready
 provision_macOS_system
 
+# check we have all the permissions
+check_snap_environment
+
 # first create or clean work directory
 prepare_work_directory
 
@@ -904,12 +990,16 @@ if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} 
   print_debug 0 "snap prepare-image failed, bailing out"
   exit
 fi
+print_debug 2 "snap prepare-image completed"
 
 # merge logs
 mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
 # determine bootloader
+determine_uc2x
 determine_bootloader
 
+# for UC20 there are no additional image modifications supported yet
+if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
 # updated seeded image per passed configurations
     # seed cloud init user_data if provided
     seed_cloud_init_user_data
@@ -935,7 +1025,7 @@ determine_bootloader
     seed_root_authorized_keys
     # Apply custom overlay if there are some
     seed_custom_overlay
-
+fi
 # create system boot if needed
 create_system_boot_partition_image
 
@@ -947,17 +1037,23 @@ fi
 mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
 
 gadget_yaml="${BUILDER_CONFIG["WORK_DIR"]}/gadget/meta/gadget.yaml"
-# check if gadget has partition 'seed', for factory reset
-if [ "seed" = "$(parse_yaml ${gadget_yaml} \
+
+# UC16/18 can have custom or normal part schema
+if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+  # create ubuntu-seed image
+  create_uc20_seed_partition_image
+else
+  # check if gadget has partition 'seed', for factory reset
+  if [ "seed" = "$(parse_yaml ${gadget_yaml} \
                   | grep -E "volumes\_.*\"name\: seed" \
                   | sed 's/\"//g' | awk '{print $2}')" ]; then
-  # creating seed partition image
-  create_seed_partition_image
-else
-  # create write partition image
-  create_writable_partition_image
+    # creating seed partition image
+    create_seed_partition_image
+  else
+    # create write partition image
+    create_writable_partition_image
+  fi
 fi
-
 # copy release files to output directory or run amba image build
 if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
   run_amba_image_build
