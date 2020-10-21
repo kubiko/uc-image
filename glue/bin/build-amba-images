@@ -1,0 +1,154 @@
+#!/bin/bash
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the the GNU General Public License version 3, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranties of
+# MERCHANTABILITY, SATISFACTORY QUALITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the applicable version of the GNU General Public
+# License for more details.
+#.
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright (C) 2020 Canonical, Ltd.
+
+GCC="aarch64-linux-gnu-gcc"
+OBJCOPY="aarch64-linux-gnu-objcopy"
+STRIP="aarch64-linux-gnu-strip"
+HOST_LZ4="host_lz4"
+
+
+# gadget amboot root
+AMBOOT=${1}
+IMAGE_DIR=${2}
+OUTPUR_DIR=${3}
+if [ -n "${4}" ]; then
+   KEYS=${4}
+else
+   KEYS=${SNAP}/keys
+fi
+
+declare -A PIGGY_MAP
+declare -A VIF_MAP
+declare -A ZFW_MAP
+PIGGY_MAP["bst_release"]="piggy_bst.S"
+VIF_MAP["bst_release"]="bst.info"
+PIGGY_MAP["bld_release"]="piggy_bld.S"
+VIF_MAP["bld_release"]="bld.info"
+PIGGY_MAP["kernel"]="piggy_kernel.S"
+VIF_MAP["kernel"]="kernel.info"
+ZFW_MAP["kernel"]="true"
+PIGGY_MAP["secondary"]="piggy_kernel.S"
+VIF_MAP["secondary"]="kernel.info"
+PIGGY_MAP["lnx"]="piggy_lnx.S"
+VIF_MAP["lnx"]="extx.info"
+ZFW_MAP["lnx"]="true"
+PIGGY_MAP["snapbootsel"]="piggy_snappybootpri.S"
+VIF_MAP["snapbootsel"]="snapbootsel.info"
+PIGGY_MAP["snapbootselbak"]="piggy_snappybootpri.S"
+VIF_MAP["snapbootselbak"]="snapbootsel.info"
+PIGGY_MAP["atf"]="piggy_atf.S"
+VIF_MAP["atf"]="atf.info"
+PIGGY_MAP["pba"]="piggy_pba.S"
+VIF_MAP["pba"]="pba.info"
+PIGGY_MAP["secondary"]="piggy_secondary.S"
+ZFW_MAP["secondary"]="true"
+PIGGY_MAP["backup"]="piggy_backup.S"
+VIF_MAP["backup"]="backup.info"
+PIGGY_MAP["ramdisk"]="piggy_ramdisk.S"
+ZFW_MAP["ramdisk"]="true"
+PIGGY_MAP["romfs"]="piggy_romfs.S"
+ZFW_MAP["romfs"]="true"
+PIGGY_MAP["dsp"]="piggy_dsp.S"
+VIF_MAP["dsp"]="dsp.info"
+ZFW_MAP["dsp"]="true"
+PIGGY_MAP["swp"]="piggy_swp.S"
+ZFW_MAP["swp"]="true"
+PIGGY_MAP["adc"]="piggy_adc.S"
+VIF_MAP["adc"]="adc.info"
+ZFW_MAP["adc"]="true"
+PIGGY_MAP["add"]="piggy_add.S"
+ZFW_MAP["add"]="true"
+PIGGY_MAP["cfg"]="piggy_cfg.S"
+VIF_MAP["cfg"]="cfg.info"
+ZFW_MAP["cfg"]="true"
+
+FW_DIR=".temp"
+MEMFW_PAYLOAD="${FW_DIR}/bst_release.fw \
+${FW_DIR}/bld_release.fw \
+${FW_DIR}/atf.fw \
+${FW_DIR}/pba.fw \
+${FW_DIR}/kernel.fw \
+${FW_DIR}/lnx.fw \
+${FW_DIR}/snapbootsel.fw \
+${FW_DIR}/snapbootselbak.fw"
+
+OBJ_DIR="${AMBOOT}/memfwprog"
+MEMFWPROG_OBJS="${OBJ_DIR}/run_once_release.o ${OBJ_DIR}/mmu_release.o ${OBJ_DIR}/armcache_release.o \
+${OBJ_DIR}/cache_release.o ${OBJ_DIR}/eabi_compat_release.o ${OBJ_DIR}/soc_fixup_release.o ${OBJ_DIR}/rct_release.o \
+${OBJ_DIR}/boot_cookie_release.o ${OBJ_DIR}/memory_release.o ${OBJ_DIR}/memcpy_release.o ${OBJ_DIR}/memmove_release.o \
+${OBJ_DIR}/memzero_release.o ${OBJ_DIR}/memcmp_release.o ${OBJ_DIR}/memset_release.o ${OBJ_DIR}/vsprintf_release.o \
+${OBJ_DIR}/random_release.o ${OBJ_DIR}/strutil_release.o ${OBJ_DIR}/crc32_release.o ${OBJ_DIR}/console_release.o \
+${OBJ_DIR}/gpio_release.o ${OBJ_DIR}/firmfl_release.o ${OBJ_DIR}/partition_release.o ${OBJ_DIR}/memfwprog_release.o \
+${OBJ_DIR}/dtb_release.o ${OBJ_DIR}/fdt_boot_release.o ${OBJ_DIR}/fdt_release.o ${OBJ_DIR}/fdt_ro_release.o \
+${OBJ_DIR}/fdt_rw_release.o ${OBJ_DIR}/fdt_strerror_release.o ${OBJ_DIR}/fdt_sw_release.o ${OBJ_DIR}/fdt_wip_release.o \
+${OBJ_DIR}/fdt_empty_tree_release.o ${OBJ_DIR}/smccc_io_release.o ${OBJ_DIR}/armv8_helper_release.o \
+${OBJ_DIR}/uart_release.o ${OBJ_DIR}/sdmmc_release.o"
+
+AFLAGS="-march=armv8-a+crc+crypto -mgeneral-regs-only -fomit-frame-pointer -fno-common \
+-nostdinc -D__ASM__ -D__BUILD_AMBOOT__ -D__ARCH_CV22__ -D__BSP_CV22_WALNUT__ -D__CORTEXA53__"
+AINCLUDES="-I${AMBOOT}/include"
+
+DDATE=$(date +"-D__YEAR__=%Y -D__MONTH__=%-m -D__DAY__=%-d")
+
+echo "Building fw files"
+for fw in bst_release bld_release kernel snapbootsel snapbootselbak lnx atf pba \
+          secondary backup ramdisk romfs dsp swp add adc cfg
+do
+  echo -e "\tBuilding ${fw}..."
+  IN_IMAGE="${IMAGE_DIR}/${fw}.bin"
+  OUT_FW="${FW_DIR}/${fw}.fw"
+  OUT_ZFW="${FW_DIR}/z${fw}.fw"
+  # if firmware binary file does not exist, build empty fw file
+  if [ -f ${IN_IMAGE} ]; then
+      DIMGLEN="-DIMG_LEN=$(stat -L -c%s ${IN_IMAGE})"
+      DCRC32="-DCRC32=0x$(rhash --bsd -C ${IN_IMAGE} | awk '{print $4}')"
+      ${GCC} ${AFLAGS} ${AINCLUDES} \
+        -DRPK_IMG=${KEYS}/rot_public.bin \
+        ${DCRC32} ${DIMGLEN} ${DDATE} \
+        -DVERSION_INFO=${AMBOOT}/vif/${VIF_MAP["${fw}"]} \
+        -DINCBIN=${IN_IMAGE} \
+        -c ${AMBOOT}/piggy/${PIGGY_MAP["${fw}"]} \
+        -o ${OUT_FW}
+      ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_FW} ${OUT_FW}
+  else
+      ${GCC} ${AFLAGS} ${AINCLUDES} \
+        -c ${AMBOOT}/piggy/${PIGGY_MAP["${fw}"]} \
+        -o ${OUT_FW}
+      ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_FW} ${OUT_FW}
+  fi
+  if [ "${ZFW_MAP["${fw}"]}" = "true" ]; then
+    # we don't use compressed fw file, create empty one
+    ${GCC} ${AFLAGS} ${AINCLUDES} \
+      -c ${AMBOOT}/piggy/${PIGGY_MAP["${fw}"]} \
+      -o ${OUT_ZFW}
+    ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_ZFW} ${OUT_ZFW}
+  fi
+done
+
+ARTEFACTS="$(find ${FW_DIR} -name "header_*.fw" -exec basename {} \; | awk -F '.' '{print $1}' | cut -c 8-)"
+# for artefact in bst bld kernel lnx bst_bld bst_bld_kernel_sbp_sbs_lnx sbp sbs
+for artefact in ${ARTEFACTS}
+do
+    echo "Building ${artefact} elf file"
+    ${GCC} \
+        -Wl,-T,${FW_DIR}/memfwprog/${artefact}.lds \
+        -nostartfiles -march=armv8-a+crc+crypto -mgeneral-regs-only -nostdlib -Wl,--build-id=none \
+        -o ${OUTPUR_DIR}/${artefact}_release.elf \
+        ${FW_DIR}/header_${artefact}.fw \
+        ${MEMFW_PAYLOAD} ${MEMFWPROG_OBJS}
+    # strip resulting binary
+    ${STRIP} --remove-section=.trash ${OUTPUR_DIR}/${artefact}_release.elf
+done

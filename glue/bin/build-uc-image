@@ -59,6 +59,7 @@ print_help () {
     echo "                        stable channel is assumed if no channel is defined"
     echo "                        example: -c edge"
     echo "  -d, --debug           print debug"
+    echo "  -dd                   print verbose debugs"
     echo ""
     echo "Common options:"
     echo "!!! Not all options are available when building Ubuntu Core 20 image!!!"
@@ -220,6 +221,7 @@ check_snap_environment () {
     done
     exit 0
   fi
+
   # check we are not running as root
   if [ "$USER" =  "root" ]; then
     echo "Please do not run with sudo, no need for this"
@@ -274,10 +276,12 @@ prepare_work_directory () {
 # dtermine if we are building for UC20
 determine_uc2x() {
   print_debug 3 "determine_uc2x"
-  if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ] \
-     || [ -n "$(grep 'base: core20' ${BUILDER_CONFIG["WORK_DIR"]}/system-seed/systems/*/model 2> /dev/null)" ]; then
+  if [ -n "$(grep 'base: core20' ${BUILDER_CONFIG["MODEL_ASSERTION"]} 2> /dev/null)" ]; then
     print_debug 2 "Target Ubuntu Core 20+ detected"
     BUILDER_CONFIG["UC20"]="true"
+  else
+    print_debug 2 "Target PRE Ubuntu Core 20 detected"
+    BUILDER_CONFIG["UC20"]="false"
   fi
 }
 
@@ -294,20 +298,21 @@ determine_bootloader () {
   done
   # UC20 behaves differently from UC16/18
   if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
-    local seed_root="system-seed"
+    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
   else
-    local seed_root="image"
+    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/image
     mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
   fi
 
+  print_debug 3 "BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["IMAGE_ROOT"]}"
   # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
-  if [  -d ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/uboot ]; then
+  if [  -d ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ]; then
     BUILDER_CONFIG["BOOTLOADER"]="uboot"
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
+    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
     cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS} ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
-  elif [ -d ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/lk ]; then
+  elif [ -d ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/lk ]; then
     BUILDER_CONFIG["BOOTLOADER"]="lk"
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/${seed_root}/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
+    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
     # check if this is amboot special case
     if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/amboot ]; then
       # set some configuratoon for amboot case
@@ -315,12 +320,14 @@ determine_bootloader () {
       BUILDER_CONFIG["AMBOOT"]="true"
     fi
   else
-    print_debug 0 "Unrecognised bootloader, existing"
+    print_debug 0 "Unrecognised bootloader, exiting"
     exit 0
   fi
 
   if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/image/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
+    # set new image root
+    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/root
   fi
   print_debug 1 "\nDetected bootloader: ${BUILDER_CONFIG["BOOTLOADER"]}"
 }
@@ -426,14 +433,14 @@ populate_partition () {
 backup_bootloader_files () {
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
     # in uboot case we gzip entire system-boot partition
-    dd if=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024k | gzip -c > "${BUILDER_CONFIG["WORK_DIR"]}/root/boot/system-boot.img.gz"
+    dd if=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024k | gzip -c > "${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/system-boot.img.gz"
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     # for lk bootloader we should have boot environment + boot image
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* ${BUILDER_CONFIG["WORK_DIR"]}/root/boot
+    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot
     # also create file for backup snapbootsel environment
     [ -f ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin ] && \
         cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin \
-           ${BUILDER_CONFIG["WORK_DIR"]}/root/boot/snapbootselbak.bin
+           ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/snapbootselbak.bin
   fi
 }
 
@@ -455,32 +462,35 @@ normalise_size_to_kb () {
 # seed cloud init user_data
 # if no cloud init user data is passed do nothing
 seed_cloud_init_user_data () {
+  print_debug 5 "seed_cloud_init_user_data(${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]})"
   if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ]; then
     print_debug 1 "\nUsing passed cloud init user data configuration: [${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}]"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/user-data
-    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/user-data
+    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/meta-data
   fi
 }
 
 # seed cloud init network config
 # if no cloud init network config is passed do nothing
 seed_cloud_init_net_config () {
+  print_debug 5 "seed_cloud_init_net_config(${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]})"
   if [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ]; then
     print_debug 1 "\nUsing passed cloud init network configuration: [${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}]"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/network-config
-    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/cloud/seed/nocloud-net/meta-data
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net
+    cp ${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/network-config
+    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/meta-data
   fi
 }
 
 # seed netplan network config if provided
 # if no netplan config is passed do nothing
 seed_netplan_config () {
+  print_debug 5 "seed_netplan_config(${BUILDER_CONFIG["NETPLAN_CONF"]})"
   if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ]; then
     print_debug 1 "\nUsing passed netplan configuration: [${BUILDER_CONFIG["NETPLAN_CONF"]}]"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/netplan
-    cp ${BUILDER_CONFIG["NETPLAN_CONF"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/netplan/00-snapd-config.yaml
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/netplan
+    cp ${BUILDER_CONFIG["NETPLAN_CONF"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/netplan/00-snapd-config.yaml
   fi
 }
 
@@ -488,23 +498,25 @@ seed_netplan_config () {
 # one assertion can be passed
 # if no assertion is passed do nothing
 seed_auto_import_assertion () {
+  print_debug 5 "seed_auto_import_assertion(${BUILDER_CONFIG["ASSERTION_IMPORT"]})"
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
-    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["WORK_DIR"]}/root/auto-import.assert
+    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/auto-import.assert
   fi
 }
 
 # invoke custom hooks if provided
 # if no hook directory is passed do nothing
 invoke_hooks () {
+  print_debug 5 "invoke_hooks"
   if [ -n "${HOOK_DIR}" ]; then
     print_debug 1 "\nInvoking hooks"
-    export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)"
+    export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})"
     if [ -f ${HOOK_DIR}/post-populate-rootfs ]; then
-      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)" ${HOOK_DIR}/post-populate-rootfs
+      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})" ${HOOK_DIR}/post-populate-rootfs
     fi
     if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
-      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["WORK_DIR"]}/root)" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
+      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
     fi
   fi
 }
@@ -512,62 +524,68 @@ invoke_hooks () {
 # disable console conf if requested
 # if disable console conf is not requested, do nothing
 disable_console_conf () {
+  print_debug 5 "disable_console_conf(${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]})"
   if [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ]; then
     print_debug 1 "\nDisabling console conf"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/console-conf
-    touch ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/console-conf/complete
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/console-conf
+    touch ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/console-conf/complete
   fi
 }
 
 # enable early getty if requested
 # if no early getty is not requested, do nothing
 enable_early_getty () {
+  print_debug 5 "enable_early_getty(${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]})"
   if [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ]; then
     print_debug 1 "\nEnabling early getty"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-getty@.service.d/
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/getty@.service.d/
-    ln -s /dev/null ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/console-conf@.service
-    ln -s /dev/null ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-console-conf@.service
-    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
-    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/
+    ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/console-conf@.service
+    ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-console-conf@.service
+    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
+    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
   fi
 }
 
 # check if device should be configured with persistent journal storage
 # if no persistent journal is passed do nothing
 enable_persisten_journal () {
+  print_debug 5 "enable_persisten_journal(${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]})"
   if [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ]; then
     print_debug 1 "\nSwitching journald to use persistent storage"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/log/journal
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/log/journal
   fi
 }
 
 # check if system's ssh server should be disabled
 # if disable ssh server is not requested do nothing
 disable_ssh_server () {
+  print_debug 5 "disable_ssh_server(${BUILDER_CONFIG["DISABLE_SSH_SERVER"]})"
   if [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ]; then
     print_debug 1 "\nDisabling system ssh server"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/ssh
-    touch ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/ssh/sshd_not_to_be_run
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/ssh
+    touch ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/ssh/sshd_not_to_be_run
   fi
 }
 
 # check if we should set default hostname
 # if no hostname is passed do nothing
 seed_hostname () {
+  print_debug 5 "seed_hostname(${BUILDER_CONFIG["HOSTNAME"]})"
   if [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ]; then
     print_debug 1 "\nSetting initial hostname to [ ${BUILDER_CONFIG["HOSTNAME"]} ]"
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/
-    echo ${BUILDER_CONFIG["HOSTNAME"]} > ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/etc/hostname
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/
+    echo ${BUILDER_CONFIG["HOSTNAME"]} > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/hostname
   fi
 }
 
 # check if we should seed authorized ssh kyes for root user
 # if no root authorised keys are passed do nothing
 seed_root_authorized_keys () {
+  print_debug 5 "seed_root_authorized_keys(${SSH_PUB_KEY_FILES})"
   if [ -n "${SSH_PUB_KEY_FILES}" ]; then
     print_debug 1 "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
-    SSH_DIR="${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/root/.ssh"
+    SSH_DIR="${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/root/.ssh"
     mkdir -p ${SSH_DIR}
     chmod 700 ${SSH_DIR}
     AUTHORIZED_KEYS="${SSH_DIR}/authorized_keys"
@@ -584,9 +602,10 @@ seed_root_authorized_keys () {
 # Apply custom overlay if there are some
 # if no custom overlay is passed do nothing
 seed_custom_overlay () {
+  print_debug 5 "seed_custom_overlay(${BUILDER_CONFIG["CUSTOM_OVERLAY"]})"
   if [ -n "${BUILDER_CONFIG["CUSTOM_OVERLAY"]}" ];then
     print_debug 1 "Applying custom overlay"
-    cp -r ${BUILDER_CONFIG["CUSTOM_OVERLAY"]}/* ${BUILDER_CONFIG["WORK_DIR"]}/root
+    cp -r ${BUILDER_CONFIG["CUSTOM_OVERLAY"]}/* ${BUILDER_CONFIG["IMAGE_ROOT"]}
   fi
 }
 
@@ -615,13 +634,13 @@ create_seed_partition_image () {
   # copy back up files in root/boot
 
   # seed partition has boot directory with backed up boot files
-  mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/boot
+  mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot
   # parse through gadget.yaml and populate seed as defined there
   populate_partition \
           ${gadget_yaml} \
           "seed" \
           ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
-          ${BUILDER_CONFIG["WORK_DIR"]}/root
+          ${BUILDER_CONFIG["IMAGE_ROOT"]}
 
   # backup bootloader related files
   backup_bootloader_files
@@ -629,7 +648,7 @@ create_seed_partition_image () {
   local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: seed" | awk -F "=" '{print $1}')
   local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
   local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
-  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${SEED_SIZE}"
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${SEED_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
       -metadata_csum \
@@ -637,7 +656,7 @@ create_seed_partition_image () {
       -E root_owner=0:0 \
       -O uninit_bg \
       -L seed \
-      -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
+      -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
       ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   # if we are not building recovery seed, convert image to sparse
   if [ ! "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ] \
@@ -666,7 +685,7 @@ create_writable_partition_image () {
           ${gadget_yaml} \
           "writable" \
           ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
-          ${BUILDER_CONFIG["WORK_DIR"]}/root
+          ${BUILDER_CONFIG["IMAGE_ROOT"]}
 
   if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
     print_debug 1 "Calculating size available for writable partition"
@@ -680,14 +699,14 @@ create_writable_partition_image () {
   else
     # make root size bigger by what be needed for boot backup
     if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
     elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/lk)" '{printf("%.0f",($1+sb+50))}')M
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/lk)" '{printf("%.0f",($1+sb+50))}')M
     else
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/root/ | awk '{printf("%.0f",($1+50))}')M
+        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk '{printf("%.0f",($1+50))}')M
     fi
   fi
-  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${BUILDER_CONFIG["WORK_DIR"]}/root ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${ROOT_SIZE}"
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${ROOT_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
       -metadata_csum \
@@ -695,7 +714,7 @@ create_writable_partition_image () {
       -E root_owner=0:0 \
       -O uninit_bg \
       -L writable \
-      -d ${BUILDER_CONFIG["WORK_DIR"]}/root \
+      -d ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
       ${ROOT_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   if [ "${BUILDER_CONFIG["BUILD_RAW"]}" != "true" ]; then
@@ -711,11 +730,11 @@ create_writable_partition_image () {
 create_uc20_seed_partition_image () {
   print_debug 1 "\nCreating UC20 seed partition image"
 
-  # calculate seed size from gadget.yaml
+  # calculate ubuntu-seed part size
   local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: ubuntu-seed" | awk -F "=" '{print $1}')
   local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
   local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
-  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ubuntu-seed -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ${SEED_SIZE}"
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ubuntu-seed -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ${SEED_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
       -metadata_csum \
@@ -723,7 +742,7 @@ create_uc20_seed_partition_image () {
       -E root_owner=0:0 \
       -O uninit_bg \
       -L ubuntu-seed \
-      -d ${BUILDER_CONFIG["WORK_DIR"]}/system-seed ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
+      -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
       ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   # if we are not building recovery seed, convert image to sparse
   print_debug 1 "\nCreate sparse image for Ubuntu seed"
@@ -801,15 +820,15 @@ run_amba_image_build () {
 generate_manifest () {
   # create image manifest
   local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
-  if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/assertions/model ]; then
-      sed '1,/timestamp/!d' ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
+  if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model ]; then
+      sed '1,/timestamp/!d' ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
   fi
-  if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/seed.yaml ]; then
+  if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml ]; then
       sed -e '/snap-id:/d' \
           -e '/contact:/d' \
           -e 's/snaps:/seeded snaps:/g' \
           -e 's/file:.*_\(.*\).snap/revision: \1/' \
-          ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/var/lib/snapd/seed/seed.yaml \
+          ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml \
         >> ${IMAGE_MANIFEST}
   fi
 }
@@ -954,6 +973,9 @@ while [ "$1" != "" ]; do
         -d | --debug)
             BUILDER_CONFIG["BUILDER_DEBUG"]=3
             ;;
+        -dd)
+            BUILDER_CONFIG["BUILDER_DEBUG"]=5
+            ;;
         -v | --version)
             echo -e "version: ${SCRIPT_VERSION}"
             exit 0
@@ -999,7 +1021,7 @@ determine_uc2x
 determine_bootloader
 
 # for UC20 there are no additional image modifications supported yet
-if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
 # updated seeded image per passed configurations
     # seed cloud init user_data if provided
     seed_cloud_init_user_data
@@ -1025,7 +1047,23 @@ if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
     seed_root_authorized_keys
     # Apply custom overlay if there are some
     seed_custom_overlay
+else
+    if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ] \
+       || [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ] \
+       || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
+       || [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ] \
+       || [ -n "${HOOK_DIR}" ] \
+       || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
+       || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
+       || [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ] \
+       || [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ] \
+       || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
+       || [ -n "${SSH_PUB_KEY_FILES}" ] \
+       || [ -n "${BUILDER_CONFIG["CUSTOM_OVERLAY"]}" ]; then
+         echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
+    fi
 fi
+
 # create system boot if needed
 create_system_boot_partition_image
 
