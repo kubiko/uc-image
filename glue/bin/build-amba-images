@@ -17,8 +17,6 @@
 GCC="aarch64-linux-gnu-gcc"
 OBJCOPY="aarch64-linux-gnu-objcopy"
 STRIP="aarch64-linux-gnu-strip"
-HOST_LZ4="host_lz4"
-
 
 # gadget amboot root
 AMBOOT=${1}
@@ -30,31 +28,65 @@ else
    KEYS=${SNAP}/keys
 fi
 
+ARCH=$(grep CONFIG_ARCH ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 13-)
+BSP=$(grep CONFIG_BSP ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 18-)
+CPU=$(grep CONFIG_CPU ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 12-)
+echo "Building for: ARCH=${ARCH} , BSP=${BSP} , CPU=${CPU}"
+
+## Mapping for firmware
 declare -A PIGGY_MAP
-declare -A VIF_MAP
+declare -A VIF_MAP     # TODO: can we read this from config?
+
+## following mappings are optional to override default behaviour
+# define which fw is expected to be provided also compressed (we fake it anyway)
 declare -A ZFW_MAP
+# if image file name does not match firmware + .bin, this will overrule default mapping
+# if image should be empty, defibe here "${EMPTY_IMAGE}", there will be empty file ready to use
+declare -A IMAGE_MAP
+# if created firmware file should have different file name,
+# this mapping overrides default behaviour
+declare -A FW_NAME_MAP
+
 PIGGY_MAP["bst_release"]="piggy_bst.S"
 VIF_MAP["bst_release"]="bst.info"
+PIGGY_MAP["gpt"]="piggy_gpt.S"
+VIF_MAP["gpt"]="gpt.info"
+IMAGE_MAP["gpt"]="gpt_both.bin"
+FW_NAME_MAP["gpt"]="gpt_both.fw"
 PIGGY_MAP["bld_release"]="piggy_bld.S"
 VIF_MAP["bld_release"]="bld.info"
 PIGGY_MAP["kernel"]="piggy_kernel.S"
 VIF_MAP["kernel"]="kernel.info"
 ZFW_MAP["kernel"]="true"
+IMAGE_MAP["kernel"]="boot.img"
 PIGGY_MAP["secondary"]="piggy_kernel.S"
 VIF_MAP["secondary"]="kernel.info"
+ZFW_MAP["secondary"]="true"
+PIGGY_MAP["snapboot_a"]="piggy_kernel.S"
+VIF_MAP["snapboot_a"]="kernel.info"
+ZFW_MAP["snapboot_a"]="true"
+PIGGY_MAP["snapboot_b"]="piggy_kernel.S"
+VIF_MAP["snapboot_b"]="kernel.info"
+ZFW_MAP["snapboot_b"]="true"
 PIGGY_MAP["lnx"]="piggy_lnx.S"
 VIF_MAP["lnx"]="extx.info"
 ZFW_MAP["lnx"]="true"
-PIGGY_MAP["snapbootsel"]="piggy_snappybootpri.S"
-VIF_MAP["snapbootsel"]="snapbootsel.info"
-PIGGY_MAP["snapbootselbak"]="piggy_snappybootpri.S"
-VIF_MAP["snapbootselbak"]="snapbootsel.info"
+PIGGY_MAP["snaprecoverysel"]="piggy_ubuntu.S"
+VIF_MAP["snaprecoverysel"]="ubuntu.info"
+IMAGE_MAP["snaprecoverysel"]="snaprecoverysel.bin"
+PIGGY_MAP["snaprecoveryselbak"]="piggy_ubuntu.S"
+VIF_MAP["snaprecoveryselbak"]="ubuntu.info"
+IMAGE_MAP["snaprecoveryselbak"]="snaprecoverysel.bin"
+PIGGY_MAP["snapbootsel"]="piggy_ubuntu.S"
+VIF_MAP["snapbootsel"]="ubuntu.info"
+IMAGE_MAP["snapbootsel"]="snapbootsel.bin"
+PIGGY_MAP["snapbootselbak"]="piggy_ubuntu.S"
+VIF_MAP["snapbootselbak"]="ubuntu.info"
+IMAGE_MAP["snapbootselbak"]="snapbootsel.bin"
 PIGGY_MAP["atf"]="piggy_atf.S"
 VIF_MAP["atf"]="atf.info"
 PIGGY_MAP["pba"]="piggy_pba.S"
 VIF_MAP["pba"]="pba.info"
-PIGGY_MAP["secondary"]="piggy_secondary.S"
-ZFW_MAP["secondary"]="true"
 PIGGY_MAP["backup"]="piggy_backup.S"
 VIF_MAP["backup"]="backup.info"
 PIGGY_MAP["ramdisk"]="piggy_ramdisk.S"
@@ -74,10 +106,21 @@ ZFW_MAP["add"]="true"
 PIGGY_MAP["cfg"]="piggy_cfg.S"
 VIF_MAP["cfg"]="cfg.info"
 ZFW_MAP["cfg"]="true"
+PIGGY_MAP["ubuntu_boot"]="piggy_ubuntu.S"
+VIF_MAP["ubuntu_boot"]="ubuntu.info"
+PIGGY_MAP["ubuntu_save"]="piggy_ubuntu.S"
+VIF_MAP["ubuntu_save"]="ubuntu.info"
+PIGGY_MAP["ubuntu_seed"]="piggy_ubuntu.S"
+VIF_MAP["ubuntu_seed"]="ubuntu.info"
+IMAGE_MAP["ubuntu_seed"]="ubuntu-seed.img"
+PIGGY_MAP["ubuntu_data"]="piggy_ubuntu.S"
+VIF_MAP["ubuntu_data"]="ubuntu.info"
 
 FW_DIR=".temp"
 MEMFW_PAYLOAD="${FW_DIR}/bst_release.fw \
 ${FW_DIR}/bld_release.fw \
+${FW_DIR}/gpt_both.fw \
+${FW_DIR}/gpt.fw \
 ${FW_DIR}/atf.fw \
 ${FW_DIR}/pba.fw \
 ${FW_DIR}/kernel.fw \
@@ -98,21 +141,31 @@ ${OBJ_DIR}/fdt_empty_tree_release.o ${OBJ_DIR}/smccc_io_release.o ${OBJ_DIR}/arm
 ${OBJ_DIR}/uart_release.o ${OBJ_DIR}/sdmmc_release.o"
 
 AFLAGS="-march=armv8-a+crc+crypto -mgeneral-regs-only -fomit-frame-pointer -fno-common \
--nostdinc -D__ASM__ -D__BUILD_AMBOOT__ -D__ARCH_CV22__ -D__BSP_CV22_WALNUT__ -D__CORTEXA53__"
+-nostdinc -D__ASM__ -D__BUILD_AMBOOT__ -D__ARCH_${ARCH}__ -D__BSP_${BSP}__ -D__${CPU}__"
 AINCLUDES="-I${AMBOOT}/include"
 
 DDATE=$(date +"-D__YEAR__=%Y -D__MONTH__=%-m -D__DAY__=%-d")
 
 echo "Building fw files"
-for fw in bst_release bld_release kernel snapbootsel snapbootselbak lnx atf pba \
-          secondary backup ramdisk romfs dsp swp add adc cfg
+for fw in bst_release bld_release gpt kernel secondary snapboot_a snapboot_b snaprecoverysel snaprecoveryselbak snapbootsel snapbootselbak lnx atf pba \
+          backup ramdisk romfs dsp swp add adc cfg ubuntu_boot ubuntu_save ubuntu_seed ubuntu_data
 do
-  echo -e "\tBuilding ${fw}..."
-  IN_IMAGE="${IMAGE_DIR}/${fw}.bin"
-  OUT_FW="${FW_DIR}/${fw}.fw"
-  OUT_ZFW="${FW_DIR}/z${fw}.fw"
-  # if firmware binary file does not exist, build empty fw file
+  # if image name is not defined, it is {fw} + .bin
+  if [ -n "${IMAGE_MAP["${fw}"]}" ]; then
+    IN_IMAGE="${IMAGE_DIR}/${IMAGE_MAP["${fw}"]}"
+  else
+    IN_IMAGE="${IMAGE_DIR}/${fw}.bin"
+  fi
+  if [ -n "${FW_NAME_MAP["${fw}"]}" ]; then
+    OUT_FW="${FW_DIR}/${FW_NAME_MAP["${fw}"]}"
+    OUT_ZFW="${FW_DIR}/z${FW_NAME_MAP["${fw}"]}"
+  else
+    OUT_FW="${FW_DIR}/${fw}.fw"
+    OUT_ZFW="${FW_DIR}/z${fw}.fw"
+  fi
+  # if firmware image binary file does not exist, build empty fw file
   if [ -f ${IN_IMAGE} ]; then
+      echo -e "\tBuilding fw file for ${fw}..."
       DIMGLEN="-DIMG_LEN=$(stat -L -c%s ${IN_IMAGE})"
       DCRC32="-DCRC32=0x$(rhash --bsd -C ${IN_IMAGE} | awk '{print $4}')"
       ${GCC} ${AFLAGS} ${AINCLUDES} \
@@ -122,12 +175,17 @@ do
         -DINCBIN=${IN_IMAGE} \
         -c ${AMBOOT}/piggy/${PIGGY_MAP["${fw}"]} \
         -o ${OUT_FW}
-      ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_FW} ${OUT_FW}
   else
+      echo -e "\tBuilding empty fw file for ${fw}..."
       ${GCC} ${AFLAGS} ${AINCLUDES} \
         -c ${AMBOOT}/piggy/${PIGGY_MAP["${fw}"]} \
         -o ${OUT_FW}
-      ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_FW} ${OUT_FW}
+  fi
+  if [ -e ${OUT_FW} ]; then
+    ${OBJCOPY} -j .text -O elf64-littleaarch64 ${OUT_FW} ${OUT_FW}
+  else
+    echo "!!!Failed to build fw file for ${fw}!!!"
+    exit 0
   fi
   if [ "${ZFW_MAP["${fw}"]}" = "true" ]; then
     # we don't use compressed fw file, create empty one
@@ -138,6 +196,9 @@ do
   fi
 done
 
+cp ${FW_DIR}/gpt_both.fw ${FW_DIR}/gpt.fw
+
+echo -e "\nBuilding release images..."
 ARTEFACTS="$(find ${FW_DIR} -name "header_*.fw" -exec basename {} \; | awk -F '.' '{print $1}' | cut -c 8-)"
 # for artefact in bst bld kernel lnx bst_bld bst_bld_kernel_sbp_sbs_lnx sbp sbs
 for artefact in ${ARTEFACTS}
