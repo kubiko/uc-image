@@ -16,16 +16,17 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=1.2
+SCRIPT_VERSION=2.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
 
+# fill in default values
 BUILDER_CONFIG["OUTPUT_DIR"]="$(readlink -f uc-db-build)"
 BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
 BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
 # delete all logs
-rm $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
+rm -rf $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
 [ -n "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
@@ -116,6 +117,7 @@ print_help () {
     echo "                        Set initial hostname to be used at first boot"
     echo "                        !!! This feature is not guarteed as it's using image overlay"
     echo " --build-recovery-seed"
+    echo "                        Only supported for uc18 with fde"
     echo "                        Build only seed partition image which can be used for"
     echo "                        - update of factory image on device"
     echo "                        - device reflash through factory reset process"
@@ -163,6 +165,7 @@ provision_macOS_system () {
     UC_BUILD_DEPENDENCIES["dosfstools"]="mkfs.vfat"
     UC_BUILD_DEPENDENCIES["fakeroot"]="fakeroot"
     UC_BUILD_DEPENDENCIES["mtools"]="mcopy"
+    UC_BUILD_DEPENDENCIES["yq"]="yq"
 
     for pckg in "${!UC_BUILD_DEPENDENCIES[@]}"
     do
@@ -258,11 +261,13 @@ print_builder_config () {
 prepare_work_directory () {
   # first clean previus tmp directories
   rm -rf $(dirname $(mktemp -u -d -t uc-db-workdir-XXXXX))/uc-db-workdir-*
+  rm -rf ${SNAP_USER_COMMON}/uc-db-builder-* 2> /dev/null
   # if work directory is not defined, use tmp one
   if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
     # work dir not defined create tmp one
     BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-db-workdir-XXXX)
-    print_debug 2 "Creating temp work directory"
+    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}
+    print_debug 2 "Creating temp work directory: ${BUILDER_CONFIG["WORK_DIR"]}"
   else
     # make sure dir exists
     if [ -d ${BUILDER_CONFIG["WORK_DIR"]} ]; then
@@ -370,78 +375,6 @@ validate_snap () {
         # store snap
         echo "${s}"
     fi
-}
-
-# parse passed yaml string
-# function return formated yaml with tags
-parse_yaml () {
-   local prefix=$2
-   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
-   sed -ne "s|,$s\]$s\$|]|" \
-        -e ":1;s|^\($s\)\($w\)$s:$s\[$s\(.*\)$s,$s\(.*\)$s\]|\1\2: [\3]\n\1  - \4|;t1" \
-        -e "s|^\($s\)\($w\)$s:$s\[$s\(.*\)$s\]|\1\2:\n\1  - \3|;p" $1 | \
-   sed -ne "s|,$s}$s\$|}|" \
-        -e ":1;s|^\($s\)-$s{$s\(.*\)$s,$s\($w\)$s:$s\(.*\)$s}|\1- {\2}\n\1  \3: \4|;t1" \
-        -e    "s|^\($s\)-$s{$s\(.*\)$s}|\1-\n\1  \2|;p" | \
-   sed -ne "s|^\($s\):|\1|" \
-        -e "s|^\($s\)-$s[\"']\(.*\)[\"']$s\$|\1$fs$fs\2|p" \
-        -e "s|^\($s\)-$s\(.*\)$s\$|\1$fs$fs\2|p" \
-        -e "s|^\($s\)\($w\)$s:$s[\"']\(.*\)[\"']$s\$|\1$fs\2$fs\3|p" \
-        -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p" | \
-   awk -F$fs '{
-      indent = length($1)/2;
-      vname[indent] = $2;
-      for (i in vname) {if (i > indent) {delete vname[i]; idx[i]=0}}
-      if(length($2)== 0){  vname[indent]= ++idx[indent] };
-      if (length($3) > 0) {
-         vn=""; for (i=0; i<indent; i++) { vn=(vn)(vname[i])("_")}
-         printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, vname[indent], $3);
-      }
-   }'
-}
-
-##
-# Populate defined partition as defined in gadget.yaml
-# parameters:
-#   - gadget yaml file
-#   - partition label in gadget to populate
-#   - directory with unpacked gadget
-#   - target directory to copy blobs
-populate_partition () {
-  local gadget_yaml=${1}
-  local part_label=${2}
-  local gadget_dir=${3}
-  local target_dir=${4}
-  print_debug 1 "\npopulate_partition: [${1}, ${2}, ${3}, ${4}]"
-  # parse through gadget.yaml and populate seed as defined
-  part_seed=$(parse_yaml ${gadget_yaml} | grep "seed" | awk -F '=' '{print $1}')
-  parse_yaml ${gadget_yaml} | grep "${part_seed}_content" | awk -F "__" '{print $2}' | sed 's/\"//g' | while read line
-  do
-    # if ":" it's source, if '=' it's target
-    [ -n "$(echo ${line} | grep ":")" ] && source=$(echo ${line} | awk -F "source: " '{print $2}')
-    [ -n "$(echo ${line} | grep "=")" ] && target=$(echo ${line} | awk -F "target=" '{print $2}')
-    if [ -n "${source}" ] && [ -n "${target}" ]; then
-      print_debug 3 "\tcp ${gadget_dir}/${source} ${target_dir}/${target}"
-      cp ${gadget_dir}/${source} ${target_dir}/${target}
-      unset source target
-    fi
-  done
-}
-
-# backup bootloader related files
-# those are used when factory reset is performed
-backup_bootloader_files () {
-  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
-    # in uboot case we gzip entire system-boot partition
-    dd if=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024k | gzip -c > "${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/system-boot.img.gz"
-  elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
-    # for lk bootloader we should have boot environment + boot image
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot
-    # also create file for backup snapbootsel environment
-    [ -f ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin ] && \
-        cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/snapbootsel.bin \
-           ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/snapbootselbak.bin
-  fi
 }
 
 # normalise passed size to kilo bytes
@@ -611,6 +544,7 @@ seed_custom_overlay () {
 
 # create system-boot partition if needed
 create_system_boot_partition_image () {
+  print_debug 5 "create_system_boot_partition_image()"
   # u-boot bootloader is using dedicated 'system-boot' partition
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
       print_debug 1 "\nCreating system-boot partition"
@@ -633,21 +567,8 @@ create_seed_partition_image () {
   print_debug 1 "\nCreating seed partition image"
   # copy back up files in root/boot
 
-  # seed partition has boot directory with backed up boot files
-  mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot
-  # parse through gadget.yaml and populate seed as defined there
-  populate_partition \
-          ${gadget_yaml} \
-          "seed" \
-          ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
-          ${BUILDER_CONFIG["IMAGE_ROOT"]}
-
-  # backup bootloader related files
-  backup_bootloader_files
-
-  local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: seed" | awk -F "=" '{print $1}')
-  local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
-  local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
+  local seed_size_human=$(yq r ${gadget_yaml} 'volumes.*.*.(name==seed).size')
+  local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
   print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L seed -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${SEED_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
@@ -658,6 +579,10 @@ create_seed_partition_image () {
       -L seed \
       -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
       ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  if [ ! -f ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ]; then
+      print_debug 1 "\nImage creation for seed partiton failed, bailing out!!!"
+      exit 0
+  fi
   # if we are not building recovery seed, convert image to sparse
   if [ ! "${BUILDER_CONFIG["RECOVERY_SEED"]}" = "true" ] \
      || [ ! "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ]; then
@@ -680,15 +605,8 @@ create_writable_partition_image () {
     exit 0
   fi
 
-  # parse through gadget.yaml and populate writable as defined
-  populate_partition \
-          ${gadget_yaml} \
-          "writable" \
-          ${BUILDER_CONFIG["WORK_DIR"]}/gadget \
-          ${BUILDER_CONFIG["IMAGE_ROOT"]}
-
   if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
-    print_debug 1 "Calculating size available for writable partition"
+    print_debug 1 "Calculating size required for writable partition"
     # db410c storage is: 7818182656 bytes (15269854)
     local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
     local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
@@ -697,13 +615,20 @@ create_writable_partition_image () {
    # ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${BOOT_ASSETS}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f", (15269854-$2)*512)}')"
     print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   else
+    print_debug 1 "Calculating required size of writable partition image"
     # make root size bigger by what be needed for boot backup
+    local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
+    print_debug 4 "root_size=${root_size}"
+
     if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "uboot" ]; then
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/system-boot)" '{printf("%.0f",($1+sb+50))}')M
+        local system_boot_size="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/system-boot | awk '{print $1}')"
+        print_debug 2 "Adding size of 'system-boot' to writable image size"
+        ROOT_SIZE=$(echo ${root_size} | awk -v sb="${system_boot_size}" '{printf("%.0f",($1+sb))}')M
     elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk -v sb="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/lk)" '{printf("%.0f",($1+sb+50))}')M
-    else
-        ROOT_SIZE=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}/ | awk '{printf("%.0f",($1+50))}')M
+        print_debug 2 "Adding size of 'lk' to writable image size"
+        local lk_size="$(du -sh ${BUILDER_CONFIG["WORK_DIR"]}/lk | awk '{print $1}')"
+        ROOT_SIZE=$(echo ${root_size} | awk -v sb="${lk_size}" '{printf("%.0f",($1+sb))}')M
+        print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
     fi
   fi
   print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L writable -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${ROOT_SIZE}"
@@ -717,6 +642,10 @@ create_writable_partition_image () {
       -d ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
       ${ROOT_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  if [ ! -f ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ]; then
+      print_debug 1 "\nImage creation for writable partiton failed, bailing out!!!"
+      exit 0
+  fi
   if [ "${BUILDER_CONFIG["BUILD_RAW"]}" != "true" ]; then
       print_debug 1 "\nCreate sparse image for writable"
       print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/writable.img"
@@ -731,9 +660,8 @@ create_uc20_seed_partition_image () {
   print_debug 1 "\nCreating UC20 seed partition image"
 
   # calculate ubuntu-seed part size
-  local seed_volume_tag=$(parse_yaml ${gadget_yaml} | grep -E "volumes\_.*\"name\: ubuntu-seed" | awk -F "=" '{print $1}')
-  local seed_size_human=$(parse_yaml ${gadget_yaml} | grep "${seed_volume_tag}_size" | sed 's/\"//g' | awk -F "=" '{print $2}')
-  local SEED_SIZE=$(normalise_size_to_kb ${seed_size_human})
+  local seed_size_human=$(yq r ${gadget_yaml} 'volumes.*.*.(name==ubuntu-seed).size')
+  local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
   print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ubuntu-seed -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ${SEED_SIZE}"
   ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
       -O \
@@ -744,12 +672,17 @@ create_uc20_seed_partition_image () {
       -L ubuntu-seed \
       -d ${BUILDER_CONFIG["IMAGE_ROOT"]} ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
       ${SEED_SIZE} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  # if we are not building recovery seed, convert image to sparse
-  print_debug 1 "\nCreate sparse image for Ubuntu seed"
-  print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img"
-  img2simg \
-     ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
-     ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  if [ ! -f ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ]; then
+      print_debug 1 "\nImage creation for ubuntu-seed partiton failed, bailing out!!!"
+      exit 0
+  fi
+  if [ "${BUILDER_CONFIG["BUILD_RAW"]}" != "true" ]; then
+      print_debug 1 "\nCreate sparse image for ubuntu-seed"
+      print_debug 2 "img2simg ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img"
+      img2simg \
+        ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
+        ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
 }
 
 copy_release_files () {
@@ -790,21 +723,21 @@ run_amba_image_build () {
           ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin
   [ -e ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ] \
     && mv ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
-          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/lnx.bin
+          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin
+
+  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ] \
+    && mv ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
+          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/ubuntu-seed.img
+
+  # add gpt image and rename it
+  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin ] \
+    && cp ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin \
+          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/gpt_both.bin
 
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
        ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/
   fi
-
-  # link boot.img to kernel.bin and snapbootsel.bin to snapbootselbak.binary
-  # as expected by amba image builder
-  ln -sf boot.img \
-         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/kernel.bin
-  ln -sf boot.img \
-         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/secondary.bin
-  ln -sf snapbootsel.bin \
-         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/snapbootselbak.bin
 
   # run amba image builder script, we need to run it in dir
   # as it has some hardcoded paths
@@ -850,6 +783,10 @@ while [ "$1" != "" ]; do
             ;;
         -O | --output-dir)
             BUILDER_CONFIG["OUTPUT_DIR"]="$(readlink -f ${2})"
+            if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
+              print_debug 0 "Passed output directory cannot be created!!"
+              exit
+            fi
             shift
             ;;
         -w | --workdir)
@@ -1068,7 +1005,7 @@ fi
 create_system_boot_partition_image
 
 # prepare output directory
-if [ -e ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
+if [ -d ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
     print_debug 2 "Cleaning output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}]"
     rm -rf ${BUILDER_CONFIG["OUTPUT_DIR"]}
 fi
@@ -1082,9 +1019,7 @@ if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
   create_uc20_seed_partition_image
 else
   # check if gadget has partition 'seed', for factory reset
-  if [ "seed" = "$(parse_yaml ${gadget_yaml} \
-                  | grep -E "volumes\_.*\"name\: seed" \
-                  | sed 's/\"//g' | awk '{print $2}')" ]; then
+  if [ -n "$(yq r ${gadget_yaml} 'volumes.*.*.(name==seed).name')" ]; then
     # creating seed partition image
     create_seed_partition_image
   else
