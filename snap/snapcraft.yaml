@@ -69,3 +69,8 @@ parts:
       snap download snapd --edge
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
+  yq:
+    plugin: nil
+    override-build: |
+      snap download yq
+      unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} yq*.snap bin/yq
