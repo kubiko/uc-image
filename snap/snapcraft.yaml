@@ -1,6 +1,6 @@
 
 name: dragonboard-builder
-version: "0.8.8"
+version: "0.8.9"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -75,3 +75,9 @@ parts:
     override-build: |
       snap download yq
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} yq*.snap bin/yq
+
+  builder-dependencies:
+    plugin: nil
+    stage-packages:
+      - rhash
+
