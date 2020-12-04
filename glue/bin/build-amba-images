@@ -31,8 +31,9 @@ fi
 ARCH=$(grep CONFIG_ARCH ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 13-)
 BSP=$(grep CONFIG_BSP ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 18-)
 CPU=$(grep CONFIG_CPU ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 12-)
+SECURE_BOOT=$(grep "^#define CONFIG_TRUSTZONE_SECURE_BOOT" ${AMBOOT}/include/config.h | awk '{print $3}')
 BUILD_TYPE="release"
-echo "Building for: ARCH=${ARCH} , BSP=${BSP} , CPU=${CPU}"
+echo "Building for: ARCH=${ARCH} , BSP=${BSP} , CPU=${CPU}, SECURE_BOOT=${SECURE_BOOT} BUILD_TYPE=${BUILD_TYPE}"
 
 ## Mapping for firmware
 declare -A PIGGY_MAP
@@ -156,6 +157,18 @@ do
     IN_IMAGE="${IMAGE_DIR}/${IMAGE_MAP["${fw}"]}"
   else
     IN_IMAGE="${IMAGE_DIR}/${fw}.bin"
+  fi
+  # if we have secure boot, use signed images for bst and atf
+  if [ "${SECURE_BOOT}" = "1" ]; then
+    if [ "${fw}" = "bst_${BUILD_TYPE}" ] || [ "${fw}" = "atf" ]; then
+      if [ -f ${IN_IMAGE}.signed ]; then
+        IN_IMAGE=${IN_IMAGE}.signed
+        echo -e "\t\tusing signed image for ${fw}"
+      fi
+    elif [ "${fw}" = "bld_${BUILD_TYPE}" ]; then
+        echo -e "\t\tusing fip image for secure boot instead of ${fw}.bin"
+        IN_IMAGE="${IMAGE_DIR}/fip.bin"
+    fi
   fi
   if [ -n "${FW_NAME_MAP["${fw}"]}" ]; then
     OUT_FW="${FW_DIR}/${FW_NAME_MAP["${fw}"]}"
