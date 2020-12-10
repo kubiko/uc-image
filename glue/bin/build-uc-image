@@ -72,6 +72,11 @@ print_help () {
     echo "                        Network config for cloud init"
     echo "  --disable-console-conf"
     echo "                        disable first boot console configuration"
+    echo "  --disk-info DISK-INFO-CONTENTS"
+    echo "                        File to be used as .disk/info on the image's rootfs."
+    echo "                        This file can contain useful information about the"
+    echo "                        target image, like image identification data, system"
+    echo "                        name, build timestamp etc."
     echo "  --auto-import-assertion  ASSERTION FILE"
     echo "                        Auto import assertion file to be included in root of main writable partiton."
     echo "                        This assertion is imported once system is fully seeded"
@@ -465,6 +470,22 @@ disable_console_conf () {
   fi
 }
 
+# add build timestamp if provided
+# if no buildstamp is passed do nothing
+disk_info_contents () {
+  print_debug 5 "disk_info_contents(${BUILDER_CONFIG["DISK_INFO_CONTENTS"]})"
+  if [ -n "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" ]; then
+    print_debug 1 "\nUsing passed disk info contents: [${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}]"
+    if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+      mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk
+      cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info
+    else
+      mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
+      cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
+    fi
+  fi
+}
+
 # enable early getty if requested
 # if no early getty is not requested, do nothing
 enable_early_getty () {
@@ -845,6 +866,16 @@ while [ "$1" != "" ]; do
         --disable-console-conf)
             BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]="true"
             ;;
+        --disk-info)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                BUILDER_CONFIG["DISK_INFO_CONTENTS"]="${f}"
+            else
+                print_debug 0 "wrong disk info file was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
         -o | --overlay)
             if [ -n "${2}" ] && [ -d ${2} ]; then
                 BUILDER_CONFIG["CUSTOM_OVERLAY"]="$(readlink -f ${2})"
@@ -957,9 +988,12 @@ mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
 determine_uc2x
 determine_bootloader
 
+# updated seeded image per passed configurations
+# add build timestamp if provided
+disk_info_contents
+
 # for UC20 there are no additional image modifications supported yet
 if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
-# updated seeded image per passed configurations
     # seed cloud init user_data if provided
     seed_cloud_init_user_data
     # seed cloud init network config if provided
