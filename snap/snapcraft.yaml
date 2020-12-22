@@ -12,7 +12,7 @@ grade: stable
 environment:
     PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$SNAP/${SNAPCRAFT_ARCH_TRIPLET}/bin:$PATH:$SNAP/aarch64-linux-gnu/bin
     LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}:$SNAP/usr/lib/${SNAPCRAFT_ARCH_TRIPLET}/android
-
+    LANG:            C
 base: core18
 
 layout:
@@ -20,6 +20,8 @@ layout:
     bind-file: $SNAP_COMMON/etc/mke2fs.conf
   /etc/mtools.conf:
     bind-file: $SNAP_COMMON/etc/mtools.conf
+  /etc/ssh/ssh_import_id:
+    bind-file: $SNAP/etc/ssh/ssh_import_id
 
 apps:
     build-uc-image:
@@ -52,6 +54,8 @@ parts:
       - dosfstools
       - gdisk
       - fakeroot
+      - openssh-client
+      - ssh-import-id
     override-build: |
       sed -i \
           -e 's|/usr/lib/|${SNAP}/usr/lib/|g' \
@@ -80,6 +84,14 @@ parts:
     plugin: nil
     stage-packages:
       - rhash
+
+  etc-assets:
+    plugin: nil
+    override-build: |
+      # copy etc assets from core18 we might need during backdoor tasks
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/etc/ssh
+      cp -r /snap/core18/current/etc/skel ${SNAPCRAFT_PART_INSTALL}/etc
+      cp /snap/core18/current/etc/ssh/sshd_config ${SNAPCRAFT_PART_INSTALL}/etc/ssh
 
   gcc:
     plugin: dump
