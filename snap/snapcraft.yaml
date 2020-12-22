@@ -25,13 +25,13 @@ layout:
 
 apps:
     build-uc-image:
-        command: usr/bin/fakeroot-sysv -- build-uc-image
+        command: bin/build-uc-image
+        adapter: none
         plugs:
             - home
             - mount-observe
             - network-observe
             - ssh-public-keys
-        adapter: none
 
 parts:
   tools:

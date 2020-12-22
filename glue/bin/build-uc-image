@@ -191,8 +191,6 @@ provision_macOS_system () {
       snap version
     fi
 
-    BUILDER_CONFIG["FAKEROOT"]="fakeroot "
-
     # update script if there is never version
     local people_url="https://people.canonical.com/~okubik/build-uc-image"
     local latest_version=$(curl -s ${people_url} | grep SCRIPT_VERSION= | head -n1 | awk -F '=' '{print $2}')
@@ -596,8 +594,8 @@ create_disk_image() {
   local volume_size="${4}"
   # build ext4 filesystem or tarball
   if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}tar --numeric-owner --group=0 --owner=0 -czf ${volume_image}.tar.gz -C ${volume_source} ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]}tar \
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} tar --numeric-owner --group=0 --owner=0 -czf ${volume_image}.tar.gz -C ${volume_source} ${volume_source}"
+    ${BUILDER_CONFIG["FAKEROOT"]} tar \
         --numeric-owner \
         --group=0 \
         --owner=0 \
@@ -606,8 +604,8 @@ create_disk_image() {
         -C ${volume_source} \
         .
   else # [ "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ];
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-    ${BUILDER_CONFIG["FAKEROOT"]}mkfs.ext4 \
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+    ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
       -O \
       -metadata_csum \
       -T default \
@@ -639,8 +637,8 @@ create_system_boot_partition_image () {
   fi
   print_debug 1 "\nCreating image for system-boot"
   if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]}tar --numeric-owner --group=0 --owner=0 -czf ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.tar.gz -C ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/"
-    ${BUILDER_CONFIG["FAKEROOT"]}tar \
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} tar --numeric-owner --group=0 --owner=0 -czf ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.tar.gz -C ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/"
+    ${BUILDER_CONFIG["FAKEROOT"]} tar \
         --numeric-owner \
         --group=0 \
         --owner=0 \
@@ -651,7 +649,7 @@ create_system_boot_partition_image () {
   else # [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]
       print_debug 1 "\nCreating system-boot partition"
       dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=131072
-      ${BUILDER_CONFIG["FAKEROOT"]}mkfs.vfat \
+      ${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat \
           -s 1 \
           -S 512 \
           -F 32 \
@@ -1024,6 +1022,9 @@ while [ "$1" != "" ]; do
     esac
     shift
 done
+
+# use fakeroot by default
+BUILDER_CONFIG["FAKEROOT"]="fakeroot"
 
 # make sure system is ready
 provision_macOS_system
