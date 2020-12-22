@@ -105,6 +105,14 @@ print_help () {
     echo "                        Raw images are needed when QFIL or qdl flash tools are used"
     echo " --build-raw            Build raw image, instead of sparse one"
     echo " --build-uuu            Instead of file system images, build tarbal representing each volume (handy for uuu flashing)"
+    echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
+    echo "     --import-id U      backdoor: use 'ssh-import-id' to get ssh public keys"
+    echo "                        may be used more than once."
+    echo "     --password P       backdoor: password, implies --password-auth"
+    echo "     --password-auth    backdoor: enable password auth"
+    echo "     --pubkeys F        backdoor: add public keys from file F"
+    echo "                                  default: ~/.ssh/id_rsa.pub unless --password"
+    echo "                                  or --import-id specified"
     echo " --journald-storage-persistent"
     echo "                        Configure system to use persistent storage for journald logs instead of default volatile settings"
     echo " --disable-ssh-server"
@@ -562,6 +570,18 @@ seed_custom_overlay () {
   fi
 }
 
+# create backdoor into the image if defined
+create_backdoor() {
+  print_debug 5 "create_backdoor(${BUILDER_CONFIG["BACKDOOR_USER"]}, ${BUILDER_CONFIG["BACKDOOR_PARAMS"]})"
+  if [ -n "${BUILDER_CONFIG["BACKDOOR_USER"]}" ];then
+    print_debug 1 "Creating backdoor for user ${BUILDER_CONFIG["BACKDOOR_USER"]}"
+    backdoor-image \
+      --user ${BUILDER_CONFIG["BACKDOOR_USER"]} \
+      ${BUILDER_CONFIG["BACKDOOR_PARAMS"]} \
+      ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data
+  fi
+}
+
 # create image for the volume
 # based on config, this can be ext4 file system image, or tarball
 # passed parameters (not all are used, depending on created volume image)
@@ -944,6 +964,41 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
+        --backdoor)
+            if [ -n "${2}" ]; then
+                BUILDER_CONFIG["BACKDOOR_USER"]="${2}"
+            else
+                print_debug 0 "Missing backdoor user parameter"
+            fi
+            shift
+            ;;
+        --import-id)
+            if [ -n "${2}" ]; then
+                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--import-id ${2}"
+            else
+                print_debug 0 "Missing import-id parameter"
+            fi
+            shift
+            ;;
+        --password)
+            if [ -n "${2}" ]; then
+                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--password ${2}"
+            else
+                print_debug 0 "Missing password parameter"
+            fi
+            shift
+            ;;
+        --pubkeys)
+            if [ -n "${2}" ]; then
+                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--pubkeys ${2}"
+            else
+                print_debug 0 "Missing pubkeys parameter"
+            fi
+            shift
+            ;;
+        --password-auth)
+            BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--password-auth"
+            ;;
         -d | --debug)
             BUILDER_CONFIG["BUILDER_DEBUG"]=3
             ;;
@@ -1026,6 +1081,8 @@ if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
     seed_root_authorized_keys
     # Apply custom overlay if there are some
     seed_custom_overlay
+    # Create backdoor if defined
+    create_backdoor
 else
     if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ] \
        || [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ] \
