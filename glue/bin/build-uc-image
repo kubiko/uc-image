@@ -764,8 +764,9 @@ run_amba_image_build () {
   cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/amboot \
         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build
   mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images
+  # copy images from blobs, ignore dir warning
   cp ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/* \
-     ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images
+     ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images 2&>/dev/null
 
   [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] \
     && mv ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
