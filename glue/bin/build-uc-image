@@ -306,7 +306,8 @@ determine_bootloader () {
     fi
   done
 
-  BUILDER_CONFIG["BOOTLOADER"]=$(yq r ${BUILDER_CONFIG["GADGET_YAML"]} "*.*.bootloader")
+  BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.[].[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
+  print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
   # UC20 behaves differently from UC16/18
   if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
     BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
@@ -323,7 +324,7 @@ determine_bootloader () {
     mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
     # cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]} ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
     # check if we have defined dtb
-    BUILDER_CONFIG["DTB"]=$(yq r ${BUILDER_CONFIG["GADGET_YAML"]} device-tree)
+    BUILDER_CONFIG["DTB"]=$(yq eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     ## lk
     BUILDER_CONFIG["BOOTLOADER"]="lk"
@@ -667,7 +668,7 @@ create_seed_partition_image () {
   print_debug 1 "\nCreating seed partition image"
   # copy back up files in root/boot
 
-  local seed_size_human=$(yq r ${BUILDER_CONFIG["GADGET_YAML"]} 'volumes.*.*.(name==seed).size')
+  local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
 
   create_disk_image \
@@ -712,7 +713,7 @@ create_uc20_seed_partition_image () {
   print_debug 1 "\nCreating UC20 seed partition image"
 
   # calculate ubuntu-seed part size
-  local seed_size_human=$(yq r ${BUILDER_CONFIG["GADGET_YAML"]} 'volumes.*.*.(name==ubuntu-seed).size')
+  local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
 
   create_disk_image \
@@ -1118,7 +1119,7 @@ if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
   create_uc20_seed_partition_image
 else
   # check if gadget has partition 'seed', for factory reset
-  if [ -n "$(yq r ${BUILDER_CONFIG["GADGET_YAML"]} 'volumes.*.*.(name==seed).name')" ]; then
+  if [ -n "$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .name' ${BUILDER_CONFIG["GADGET_YAML"]})" ]; then
     # creating seed partition image
     create_seed_partition_image
   else
