@@ -285,9 +285,16 @@ prepare_work_directory () {
 # dtermine if we are building for UC20
 determine_uc2x() {
   print_debug 3 "determine_uc2x"
+  # we can have true uc20 and we can have uc20 with disk and boot as uc16/18
+  # grade keyword is only defined for tru uc20
   if [ -n "$(grep 'base: core20' ${BUILDER_CONFIG["MODEL_ASSERTION"]} 2> /dev/null)" ]; then
-    print_debug 2 "Target Ubuntu Core 20+ detected"
-    BUILDER_CONFIG["UC20"]="true"
+    if [ -n "$(grep '^grade:' ${BUILDER_CONFIG["MODEL_ASSERTION"]} 2> /dev/null)" ]; then
+      print_debug 2 "Target Ubuntu Core 20+ detected"
+      BUILDER_CONFIG["UC20"]="true"
+    else
+      print_debug 2 "Target Ubuntu Core 20 with UC18 disk and boot style!!"
+      BUILDER_CONFIG["UC20"]="false"
+    fi
   else
     print_debug 2 "Target PRE Ubuntu Core 20 detected"
     BUILDER_CONFIG["UC20"]="false"
