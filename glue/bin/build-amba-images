@@ -32,115 +32,15 @@ ARCH=$(grep CONFIG_ARCH ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 13
 BSP=$(grep CONFIG_BSP ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 18-)
 CPU=$(grep CONFIG_CPU ${AMBOOT}/include/config.h | awk '{print $2}'| cut -c 12-)
 SECURE_BOOT=$(grep "^#define CONFIG_TRUSTZONE_SECURE_BOOT" ${AMBOOT}/include/config.h | awk '{print $3}')
-BUILD_TYPE="release"
 echo "Building for: ARCH=${ARCH} , BSP=${BSP} , CPU=${CPU}, SECURE_BOOT=${SECURE_BOOT} BUILD_TYPE=${BUILD_TYPE}"
 
-## Mapping for firmware
-declare -A PIGGY_MAP
-declare -A VIF_MAP     # TODO: can we read this from config?
-
-## following mappings are optional to override default behaviour
-# define which fw is expected to be provided also compressed (we fake it anyway)
-declare -A ZFW_MAP
-# if image file name does not match firmware + .bin, this will overrule default mapping
-# if image should be empty, defibe here "${EMPTY_IMAGE}", there will be empty file ready to use
-declare -A IMAGE_MAP
-# if created firmware file should have different file name,
-# this mapping overrides default behaviour
-declare -A FW_NAME_MAP
-
-PIGGY_MAP["bst_${BUILD_TYPE}"]="piggy_bst.S"
-VIF_MAP["bst_${BUILD_TYPE}"]="bst.info"
-PIGGY_MAP["gpt"]="piggy_gpt.S"
-VIF_MAP["gpt"]="gpt.info"
-IMAGE_MAP["gpt"]="gpt_both.bin"
-FW_NAME_MAP["gpt"]="gpt_both.fw"
-PIGGY_MAP["bld_${BUILD_TYPE}"]="piggy_bld.S"
-VIF_MAP["bld_${BUILD_TYPE}"]="bld.info"
-PIGGY_MAP["kernel"]="piggy_kernel.S"
-VIF_MAP["kernel"]="kernel.info"
-ZFW_MAP["kernel"]="true"
-IMAGE_MAP["kernel"]="boot.img"
-PIGGY_MAP["secondary"]="piggy_kernel.S"
-VIF_MAP["secondary"]="kernel.info"
-ZFW_MAP["secondary"]="true"
-PIGGY_MAP["snapboot_a"]="piggy_kernel.S"
-VIF_MAP["snapboot_a"]="kernel.info"
-ZFW_MAP["snapboot_a"]="true"
-PIGGY_MAP["snapboot_b"]="piggy_kernel.S"
-VIF_MAP["snapboot_b"]="kernel.info"
-ZFW_MAP["snapboot_b"]="true"
-PIGGY_MAP["lnx"]="piggy_lnx.S"
-VIF_MAP["lnx"]="extx.info"
-ZFW_MAP["lnx"]="true"
-PIGGY_MAP["snaprecoverysel"]="piggy_ubuntu.S"
-VIF_MAP["snaprecoverysel"]="ubuntu.info"
-IMAGE_MAP["snaprecoverysel"]="snaprecoverysel.bin"
-PIGGY_MAP["snaprecoveryselbak"]="piggy_ubuntu.S"
-VIF_MAP["snaprecoveryselbak"]="ubuntu.info"
-IMAGE_MAP["snaprecoveryselbak"]="snaprecoverysel.bin"
-PIGGY_MAP["snapbootsel"]="piggy_ubuntu.S"
-VIF_MAP["snapbootsel"]="ubuntu.info"
-IMAGE_MAP["snapbootsel"]="snapbootsel.bin"
-PIGGY_MAP["snapbootselbak"]="piggy_ubuntu.S"
-VIF_MAP["snapbootselbak"]="ubuntu.info"
-IMAGE_MAP["snapbootselbak"]="snapbootsel.bin"
-PIGGY_MAP["atf"]="piggy_atf.S"
-VIF_MAP["atf"]="atf.info"
-PIGGY_MAP["pba"]="piggy_pba.S"
-VIF_MAP["pba"]="pba.info"
-PIGGY_MAP["backup"]="piggy_backup.S"
-VIF_MAP["backup"]="backup.info"
-PIGGY_MAP["ramdisk"]="piggy_ramdisk.S"
-ZFW_MAP["ramdisk"]="true"
-PIGGY_MAP["romfs"]="piggy_romfs.S"
-ZFW_MAP["romfs"]="true"
-PIGGY_MAP["dsp"]="piggy_dsp.S"
-VIF_MAP["dsp"]="dsp.info"
-ZFW_MAP["dsp"]="true"
-PIGGY_MAP["swp"]="piggy_swp.S"
-ZFW_MAP["swp"]="true"
-PIGGY_MAP["adc"]="piggy_adc.S"
-VIF_MAP["adc"]="adc.info"
-ZFW_MAP["adc"]="true"
-PIGGY_MAP["add"]="piggy_add.S"
-ZFW_MAP["add"]="true"
-PIGGY_MAP["cfg"]="piggy_cfg.S"
-VIF_MAP["cfg"]="cfg.info"
-ZFW_MAP["cfg"]="true"
-PIGGY_MAP["ubuntu_boot"]="piggy_ubuntu.S"
-VIF_MAP["ubuntu_boot"]="ubuntu.info"
-PIGGY_MAP["ubuntu_save"]="piggy_ubuntu.S"
-VIF_MAP["ubuntu_save"]="ubuntu.info"
-PIGGY_MAP["ubuntu_seed"]="piggy_ubuntu.S"
-VIF_MAP["ubuntu_seed"]="ubuntu.info"
-IMAGE_MAP["ubuntu_seed"]="ubuntu-seed.img"
-PIGGY_MAP["ubuntu_data"]="piggy_ubuntu.S"
-VIF_MAP["ubuntu_data"]="ubuntu.info"
-
-FW_DIR=".temp"
-MEMFW_PAYLOAD="${FW_DIR}/bst_${BUILD_TYPE}.fw \
-${FW_DIR}/bld_${BUILD_TYPE}.fw \
-${FW_DIR}/gpt_both.fw \
-${FW_DIR}/gpt.fw \
-${FW_DIR}/atf.fw \
-${FW_DIR}/pba.fw \
-${FW_DIR}/kernel.fw \
-${FW_DIR}/lnx.fw \
-${FW_DIR}/snapbootsel.fw \
-${FW_DIR}/snapbootselbak.fw"
-
-OBJ_DIR="${AMBOOT}/memfwprog"
-MEMFWPROG_OBJS="${OBJ_DIR}/run_once_${BUILD_TYPE}.o ${OBJ_DIR}/mmu_${BUILD_TYPE}.o ${OBJ_DIR}/armcache_${BUILD_TYPE}.o \
-${OBJ_DIR}/cache_${BUILD_TYPE}.o ${OBJ_DIR}/eabi_compat_${BUILD_TYPE}.o ${OBJ_DIR}/soc_fixup_${BUILD_TYPE}.o ${OBJ_DIR}/rct_${BUILD_TYPE}.o \
-${OBJ_DIR}/boot_cookie_${BUILD_TYPE}.o ${OBJ_DIR}/memory_${BUILD_TYPE}.o ${OBJ_DIR}/memcpy_${BUILD_TYPE}.o ${OBJ_DIR}/memmove_${BUILD_TYPE}.o \
-${OBJ_DIR}/memzero_${BUILD_TYPE}.o ${OBJ_DIR}/memcmp_${BUILD_TYPE}.o ${OBJ_DIR}/memset_${BUILD_TYPE}.o ${OBJ_DIR}/vsprintf_${BUILD_TYPE}.o \
-${OBJ_DIR}/random_${BUILD_TYPE}.o ${OBJ_DIR}/strutil_${BUILD_TYPE}.o ${OBJ_DIR}/crc32_${BUILD_TYPE}.o ${OBJ_DIR}/console_${BUILD_TYPE}.o \
-${OBJ_DIR}/gpio_${BUILD_TYPE}.o ${OBJ_DIR}/firmfl_${BUILD_TYPE}.o ${OBJ_DIR}/partition_${BUILD_TYPE}.o ${OBJ_DIR}/memfwprog_${BUILD_TYPE}.o \
-${OBJ_DIR}/dtb_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_boot_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_ro_${BUILD_TYPE}.o \
-${OBJ_DIR}/fdt_rw_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_strerror_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_sw_${BUILD_TYPE}.o ${OBJ_DIR}/fdt_wip_${BUILD_TYPE}.o \
-${OBJ_DIR}/fdt_empty_tree_${BUILD_TYPE}.o ${OBJ_DIR}/smccc_io_${BUILD_TYPE}.o ${OBJ_DIR}/armv8_helper_${BUILD_TYPE}.o \
-${OBJ_DIR}/uart_${BUILD_TYPE}.o ${OBJ_DIR}/sdmmc_${BUILD_TYPE}.o"
+if [ ! -e ${AMBOOT}/.uc-image-config ]; then
+  echo -e "Missing Ubuntu Core image configuration (uc-image-config)"
+  echo -e "Check and ensure gadget snap contains this configuration"
+  exit 0
+else
+  source ${AMBOOT}/.uc-image-config
+fi
 
 AFLAGS="-march=armv8-a+crc+crypto -mgeneral-regs-only -fomit-frame-pointer -fno-common \
 -nostdinc -D__ASM__ -D__BUILD_AMBOOT__ -D__ARCH_${ARCH}__ -D__BSP_${BSP}__ -D__${CPU}__"
@@ -149,8 +49,7 @@ AINCLUDES="-I${AMBOOT}/include"
 DDATE=$(date +"-D__YEAR__=%Y -D__MONTH__=%-m -D__DAY__=%-d")
 
 echo "Building fw files"
-for fw in bst_${BUILD_TYPE} bld_${BUILD_TYPE} gpt kernel secondary snapboot_a snapboot_b snaprecoverysel snaprecoveryselbak snapbootsel snapbootselbak lnx atf pba \
-          backup ramdisk romfs dsp swp add adc cfg ubuntu_boot ubuntu_save ubuntu_seed ubuntu_data
+for fw in ${FW_FILES_TO_BUILD}
 do
   # if image name is not defined, it is {fw} + .bin
   if [ -n "${IMAGE_MAP["${fw}"]}" ]; then
