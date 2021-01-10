@@ -659,6 +659,15 @@ create_system_boot_partition_image () {
   if [ ! "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     return
   fi
+  # check if we need to copy any assets from gadget first
+  local source="$(yq eval '.volumes.[].structure.[] | select(.role == "system-boot") | .content.[].source' ${BUILDER_CONFIG["GADGET_YAML"]})"
+  if [ -n "${source}" ]; then
+    local target="$(yq eval '.volumes.[].structure.[] | select(.role == "system-boot") | .content.[].target' ${BUILDER_CONFIG["GADGET_YAML"]})"
+    if [ -n "${target}" ]; then
+      cp -r ${BUILDER_CONFIG["GADGET_DIR"]}/${source} \
+            ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/${target}
+    fi
+  fi
   print_debug 1 "\nCreating image for system-boot"
   if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
     print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} tar --numeric-owner --group=0 --owner=0 -czf ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.tar.gz -C ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/"
