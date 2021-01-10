@@ -323,8 +323,8 @@ determine_bootloader () {
   # determine boot assets dir
   for ba in ${BOOT_ASSETS_CANDIDATES}
   do
-    if [ -d ${BUILDER_CONFIG["WORK_DIR"]}/gadget/${ba} ]; then
-      BUILDER_CONFIG["BOOT_ASSETS"]=${BUILDER_CONFIG["WORK_DIR"]}/gadget/${ba}
+    if [ -d ${BUILDER_CONFIG["GADGET_DIR"]}/${ba} ]; then
+      BUILDER_CONFIG["BOOT_ASSETS"]=${BUILDER_CONFIG["GADGET_DIR"]}/${ba}
       continue
     fi
   done
@@ -783,11 +783,11 @@ copy_release_files () {
 
 run_amba_image_build () {
   # gather files for amba image build first
-  cp -r ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/amboot \
+  cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot \
         ${BUILDER_CONFIG["WORK_DIR"]}/amba-build
   mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images
-  # copy images from blobs, ignore dir warning
-  cp ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/* \
+  # copy images from gadget assets, ignore dir warning
+  cp ${BUILDER_CONFIG["BOOT_ASSETS"]}/* \
      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images 2>/dev/null
 
   [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] \
@@ -802,8 +802,8 @@ run_amba_image_build () {
           ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/ubuntu-seed.img
 
   # add gpt image and rename it
-  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin ] \
-    && cp ${BUILDER_CONFIG["WORK_DIR"]}/gadget/blobs/gpt_both0.bin \
+  [ -e ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin ] \
+    && cp ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin \
           ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/gpt_both.bin
 
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
@@ -1069,7 +1069,8 @@ if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} 
 fi
 print_debug 2 "snap prepare-image completed"
 
-BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget/meta/gadget.yaml"
+BUILDER_CONFIG["GADGET_DIR"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget"
+BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
 
 # merge logs
 mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
