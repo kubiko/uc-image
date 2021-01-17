@@ -1,6 +1,6 @@
 
 name: dragonboard-builder
-version: "1.9.9"
+version: "2.9.9"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -15,7 +15,7 @@ environment:
     LANG:            C
     PYTHONPATH:      $SNAP/usr/lib/python3/dist-packages
 
-base: core18
+base: core20
 
 layout:
   /etc/mke2fs.conf:
