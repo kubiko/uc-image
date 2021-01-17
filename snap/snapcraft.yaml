@@ -58,6 +58,8 @@ parts:
       - fakeroot
       - openssh-client
       - ssh-import-id
+      - ca-certificates
+      - wget
     override-build: |
       sed -i \
           -e 's|/usr/lib/|${SNAP}/usr/lib/|g' \
