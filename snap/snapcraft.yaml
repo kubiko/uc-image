@@ -65,6 +65,9 @@ parts:
           -e 's|FAKEROOT_BINDIR=|FAKEROOT_BINDIR=${SNAP}|g' \
           ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot-sysv
       ln -sf fakeroot-sysv ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot
+    stage:
+      # make sure we do not have pulled in lsb_release, it makes no sense
+      - -usr/bin/lsb_release
 
   glue:
     plugin: dump
