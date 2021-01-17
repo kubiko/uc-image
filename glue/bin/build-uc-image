@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=2.2
+SCRIPT_VERSION=3.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -281,7 +281,6 @@ print_builder_config () {
 prepare_work_directory () {
   # first clean previus tmp directories
   rm -rf $(dirname $(mktemp -u -d -t uc-db-workdir-XXXXX))/uc-db-workdir-*
-  rm -rf ${SNAP_USER_COMMON}/uc-db-builder-* 2> /dev/null
   # if work directory is not defined, use tmp one
   if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
     # work dir not defined create tmp one
@@ -627,7 +626,7 @@ create_disk_image() {
         ${volume_image}.tar.gz \
         -C ${volume_source} \
         .
-  else # [ "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ];
+  else # build ext4 disk image
     print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
     ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
       -O \
@@ -643,14 +642,12 @@ create_disk_image() {
       exit 0
     fi
     # build sparse if needed
-    if [ ! "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ]; then
-       print_debug 1 "\nCreate sparse image for ${volume_label}"
-       print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
-       img2simg \
-         ${volume_image}.raw \
-         ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-    fi
-  fi # [ "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ];
+    print_debug 1 "\nCreate sparse image for ${volume_label}"
+    print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
+    img2simg \
+      ${volume_image}.raw \
+      ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
 }
 
 # create system-boot partition if needed
@@ -756,15 +753,18 @@ create_uc20_seed_partition_image () {
 }
 
 copy_release_files () {
-  if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ] \
-    || [ "${BUILDER_CONFIG["BUILD_RAW"]}" = "true" ]; then
-        [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] \
-          && mv ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
-                ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-        [ -e ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ] \
-          && mv ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
-                ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-  fi
+  # copy created disk images to the output directory
+  for rf in writable seed ubuntu-seed
+  do
+    if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img ]; then
+      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img \
+         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+      if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ]; then
+        mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.raw \
+           ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+      fi
+    fi
+  done
 
   # copy gadget boot assets files if making normal release
   cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/* \
