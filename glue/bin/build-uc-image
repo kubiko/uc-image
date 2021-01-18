@@ -165,12 +165,14 @@ provision_macOS_system () {
     echo -e "\nChecking system dependencies"
     # brew list is very slow, so check for files instead
     declare -A UC_BUILD_DEPENDENCIES
+    UC_BUILD_DEPENDENCIES["coreutils"]="realpath"
     UC_BUILD_DEPENDENCIES["e2fsprogs"]="mkfs.ext4"
     UC_BUILD_DEPENDENCIES["simg2img"]="img2simg"
     UC_BUILD_DEPENDENCIES["squashfs"]="mksquashfs"
     UC_BUILD_DEPENDENCIES["dosfstools"]="mkfs.vfat"
     UC_BUILD_DEPENDENCIES["fakeroot"]="fakeroot"
     UC_BUILD_DEPENDENCIES["mtools"]="mcopy"
+    UC_BUILD_DEPENDENCIES["wget"]="wget"
     UC_BUILD_DEPENDENCIES["yq"]="yq"
     UC_BUILD_PYTHON_DEPENDENCIES["ssh-import-id"]="ssh-import-id"
 
@@ -179,7 +181,7 @@ provision_macOS_system () {
     do
       if [ ! -f "$(which  ${UC_BUILD_DEPENDENCIES[${pckg}]})" ]; then
         echo -e "installing brew cellar ${pckg}"
-        # brew install ${pckg}
+        brew install ${pckg}
       fi
     done
     # handle build dependecies installed by pip
@@ -187,7 +189,7 @@ provision_macOS_system () {
     do
       if [ ! -f "$(which  ${UC_BUILD_PYTHON_DEPENDENCIES[${pippckg}]})" ]; then
         echo -e "installing pip package ${pippckg}"
-        # pip install ${pippckg}
+        pip install ${pippckg}
       fi
     done
 
@@ -847,6 +849,9 @@ generate_manifest () {
   fi
 }
 
+# make sure system is ready before we even start parsing input
+provision_macOS_system
+
 # parse passed parameters
 while [ "$1" != "" ]; do
     case $1 in
@@ -1058,9 +1063,6 @@ done
 
 # use fakeroot by default
 BUILDER_CONFIG["FAKEROOT"]="fakeroot"
-
-# make sure system is ready
-provision_macOS_system
 
 # check we have all the permissions
 check_snap_environment
