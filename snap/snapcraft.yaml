@@ -1,6 +1,6 @@
 
 name: dragonboard-builder
-version: "2.9.11"
+version: "2.9.12"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -22,8 +22,6 @@ layout:
     bind-file: $SNAP_COMMON/etc/mke2fs.conf
   /etc/mtools.conf:
     bind-file: $SNAP_COMMON/etc/mtools.conf
-  /etc/ssh/ssh_import_id:
-    bind-file: $SNAP/etc/ssh/ssh_import_id
 
 apps:
     build-uc-image:
@@ -67,6 +65,10 @@ parts:
           -e 's|FAKEROOT_BINDIR=|FAKEROOT_BINDIR=${SNAP}|g' \
           ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot-sysv
       ln -sf fakeroot-sysv ${SNAPCRAFT_PART_INSTALL}/usr/bin/fakeroot
+      # fix ssh_import_id search path for etc/ssh/ssh_import_id
+      sed -i \
+          's|\(conf_file = \).*|\1os.path.join(os.getenv("SNAP"), "etc/ssh/ssh_import_id")|g' \
+          ${SNAPCRAFT_PART_INSTALL}/usr/lib/python3/dist-packages/ssh_import_id/__init__.py
     stage:
       # make sure we do not have pulled in lsb_release, it makes no sense
       - -usr/bin/lsb_release
