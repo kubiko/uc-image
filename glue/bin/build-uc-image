@@ -325,12 +325,13 @@ determine_bootloader () {
   for ba in ${BOOT_ASSETS_CANDIDATES}
   do
     if [ -d ${BUILDER_CONFIG["GADGET_DIR"]}/${ba} ]; then
-      BUILDER_CONFIG["BOOT_ASSETS"]=${BUILDER_CONFIG["GADGET_DIR"]}/${ba}
-      continue
+      BUILDER_CONFIG["BOOT_ASSETS"]="${BUILDER_CONFIG["GADGET_DIR"]}/${ba}"
+      break
     fi
   done
 
-  BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.[].[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
+  print_debug 5 "bootloader: yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
+  BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
   print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
   # UC20 behaves differently from UC16/18
   if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
