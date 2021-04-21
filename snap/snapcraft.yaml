@@ -1,6 +1,5 @@
-
-name: dragonboard-builder
-version: "2.9.13"
+name: uc-image
+version: "4.0.0"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -24,8 +23,8 @@ layout:
     bind-file: $SNAP_COMMON/etc/mtools.conf
 
 apps:
-    build-uc-image:
-        command: bin/build-uc-image
+    uc-image:
+        command: bin/uc-image
         adapter: none
         plugs:
             - home
