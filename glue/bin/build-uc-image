@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=3.0
+SCRIPT_VERSION=4.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -346,8 +346,9 @@ determine_bootloader () {
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
-    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
-    # cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]} ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/
+    if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+      mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
+    fi
     # check if we have defined dtb
     BUILDER_CONFIG["DTB"]=$(yq eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
@@ -772,7 +773,8 @@ copy_release_files () {
   # copy gadget boot assets files if making normal release
   cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/* \
         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ] &&  \
+     [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
     mv ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.* \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
@@ -1146,14 +1148,14 @@ if [ -d ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
 fi
 mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
 
-# create system boot if needed
-create_system_boot_partition_image
-
 # UC16/18 can have custom or normal part schema
 if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
   # create ubuntu-seed image
   create_uc20_seed_partition_image
 else
+  # create system boot if needed
+  create_system_boot_partition_image
+
   # check if gadget has partition 'seed', for factory reset
   if [ -n "$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .name' ${BUILDER_CONFIG["GADGET_YAML"]})" ]; then
     # creating seed partition image
