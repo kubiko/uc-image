@@ -32,6 +32,11 @@ apps:
             - network-observe
             - ssh-public-keys
 
+architectures:
+    - build-on: armhf
+    - build-on: arm64
+    - build-on: amd64
+
 parts:
   tools:
     plugin: nil
