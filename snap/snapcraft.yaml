@@ -1,5 +1,5 @@
 name: uc-image
-version: "4.0.0"
+version: "4.0.1"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -18,9 +18,9 @@ base: core20
 
 layout:
   /etc/mke2fs.conf:
-    bind-file: $SNAP_COMMON/etc/mke2fs.conf
+    bind-file: $SNAP/etc/mke2fs.conf
   /etc/mtools.conf:
-    bind-file: $SNAP_COMMON/etc/mtools.conf
+    bind-file: $SNAP/etc/mtools.conf
 
 apps:
     uc-image:
