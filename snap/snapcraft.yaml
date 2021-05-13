@@ -1,5 +1,5 @@
 name: uc-image
-version: "4.0.1"
+version: "4.0.2"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -30,6 +30,7 @@ apps:
             - home
             - mount-observe
             - network-observe
+            - removable-media
             - ssh-public-keys
 
 architectures:
