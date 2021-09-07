@@ -103,8 +103,11 @@ print_help () {
     echo "                        fastboot typically expects sparse image for ext4 partitions, to minimise size of the"
     echo "                        image to be flashed."
     echo "                        Raw images are needed when QFIL or qdl flash tools are used"
+    echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --build-raw            Build raw image, instead of sparse one"
+    echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --build-uuu            Instead of file system images, build tarbal representing each volume (handy for uuu flashing)"
+    echo " --use-android-fs-tools Use android make_ext4fs instead of mkfs.ext4"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
     echo "     --import-id U      backdoor: use 'ssh-import-id' to get ssh public keys"
     echo "                        may be used more than once."
@@ -631,26 +634,36 @@ create_disk_image() {
         -C ${volume_source} \
         .
   else # build ext4 disk image
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-    ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
-      -O \
-      -metadata_csum \
-      -T default \
-      -E root_owner=0:0 \
-      -O uninit_bg \
-      -L ${volume_label} \
-      -d ${volume_source} ${volume_image}.raw \
-      ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-    if [ ! -f ${volume_image}.raw ]; then
-      print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
-      exit 0
+    if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
+      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
+      ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
+         -L ${volume_label} \
+         -l ${volume_size} \
+         -s \
+         ${volume_image}.img \
+         ${volume_source}
+    else
+      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+      ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
+        -O \
+        -metadata_csum \
+        -T default \
+        -E root_owner=0:0 \
+        -O uninit_bg \
+        -L ${volume_label} \
+        -d ${volume_source} ${volume_image}.raw \
+        ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+      if [ ! -f ${volume_image}.raw ]; then
+        print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
+        exit 0
+      fi
+      # build sparse if needed
+      print_debug 1 "\nCreate sparse image for ${volume_label}"
+      print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
+      img2simg \
+        ${volume_image}.raw \
+        ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
     fi
-    # build sparse if needed
-    print_debug 1 "\nCreate sparse image for ${volume_label}"
-    print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
-    img2simg \
-      ${volume_image}.raw \
-      ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   fi
 }
 
@@ -969,6 +982,9 @@ while [ "$1" != "" ]; do
             ;;
         --build-uuu)
             BUILDER_CONFIG["BUILD_UUU"]="true"
+            ;;
+        --use-android-fs-tools)
+            BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
             ;;
         --journald-storage-persistent)
             BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]="true"

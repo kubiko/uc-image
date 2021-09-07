@@ -1,5 +1,5 @@
 name: uc-image
-version: "4.0.2"
+version: "4.1.0"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -137,3 +137,8 @@ parts:
       - bin/aarch64-linux-gnu-strip
       - libexec/gcc/aarch64-linux-gnu/*/cc1
       - libexec/gcc/aarch64-linux-gnu/*/liblto_plugin.so*
+
+  android-mkfs-tools:
+    plugin: nil
+    stage-packages:
+      - android-sdk-ext4-utils
