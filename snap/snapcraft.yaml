@@ -1,5 +1,5 @@
 name: uc-image
-version: "4.1.0"
+version: "4.1.1"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -63,6 +63,7 @@ parts:
       - ssh-import-id
       - ca-certificates
       - wget
+      - xdelta3
     override-build: |
       sed -i \
           -e 's|/usr/lib/|${SNAP}/usr/lib/|g' \
