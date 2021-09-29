@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.0
+SCRIPT_VERSION=4.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -25,6 +25,12 @@ declare -A BUILDER_CONFIG
 BUILDER_CONFIG["OUTPUT_DIR"]="$(readlink -f uc-db-build)"
 BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
 BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
+# special files to be copied from gadget snap if any exists
+# they are typically not mapped to any partition, so won't be picked based on
+# gadget yaml
+# uc.lst: uuu flash config file
+# gpt_* : partition table files
+BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin"
 # delete all logs
 rm -rf $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
@@ -108,6 +114,7 @@ print_help () {
     echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --build-uuu            Instead of file system images, build tarbal representing each volume (handy for uuu flashing)"
     echo " --use-android-fs-tools Use android make_ext4fs instead of mkfs.ext4"
+    echo " --build-seed-image     Build compressed ubuntu-seed fs image release"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
     echo "     --import-id U      backdoor: use 'ssh-import-id' to get ssh public keys"
     echo "                        may be used more than once."
@@ -658,11 +665,17 @@ create_disk_image() {
         exit 0
       fi
       # build sparse if needed
-      print_debug 1 "\nCreate sparse image for ${volume_label}"
-      print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
-      img2simg \
-        ${volume_image}.raw \
-        ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+      if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
+        print_debug 1 "\nCompressing image for ${volume_label}"
+        print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
+        xz -c ${volume_image}.raw  > ${volume_image}.img.xz
+      else
+        print_debug 1 "\nCreate sparse image for ${volume_label}"
+        print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
+        img2simg \
+          ${volume_image}.raw \
+          ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+      fi
     fi
   fi
 }
@@ -781,19 +794,40 @@ copy_release_files () {
            ${BUILDER_CONFIG["OUTPUT_DIR"]}/
       fi
     fi
+    # check also for imx.xz
+    if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz ]; then
+      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz \
+         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    fi
   done
 
   # copy gadget boot assets files if making normal release
-  cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/* \
+  for f in $(yq eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
+  do
+    if [ -e ${BUILDER_CONFIG["GADGET_DIR"]}/${f} ]; then
+      cp ${BUILDER_CONFIG["GADGET_DIR"]}/${f} \
+       ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    fi
+  done
+  # copy over special files e.g. gpt_*, uc.lst. Assume use of wild cards
+  for sf in ${BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]}
+  do
+    if compgen -G ${BUILDER_CONFIG["BOOT_ASSETS"]}/${sf} > /dev/null; then
+      cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/${sf} \
         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ] &&  \
-     [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+    fi
+  done
+  # handle uc-16/18 u-boot case
+  if compgen -G ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.* > /dev/null; then
     mv ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.* \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}
-  elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
+  fi
+  # if booloader is lk, copy over boot image
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/
   fi
+  # handle special uuu case
   if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
     mv ${BUILDER_CONFIG["WORK_DIR"]}/*.tar.gz \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}
@@ -985,6 +1019,9 @@ while [ "$1" != "" ]; do
             ;;
         --use-android-fs-tools)
             BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
+            ;;
+        --build-seed-image)
+            BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
             ;;
         --journald-storage-persistent)
             BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]="true"
@@ -1182,7 +1219,9 @@ else
   fi
 fi
 # copy release files to output directory or run amba image build
-if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
+# if we are building system-seed image, do not run amba_image_build
+if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ] && \
+   [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" != "true" ]; then
   run_amba_image_build
 else
   copy_release_files
