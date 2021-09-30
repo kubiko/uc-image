@@ -87,13 +87,13 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      snap download snapd --edge
+      SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
   yq:
     plugin: nil
     override-build: |
-      snap download yq
+      SNAPPY_STORE_NO_CDN=1 snap download yq
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} yq*.snap bin/yq
 
   builder-dependencies:
