@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.2
+SCRIPT_VERSION=4.2.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -25,12 +25,15 @@ declare -A BUILDER_CONFIG
 BUILDER_CONFIG["OUTPUT_DIR"]="$(readlink -f uc-db-build)"
 BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
 BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
+
 # special files to be copied from gadget snap if any exists
 # they are typically not mapped to any partition, so won't be picked based on
 # gadget yaml
 # uc.lst: uuu flash config file
 # gpt_* : partition table files
-BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin"
+# Qualcomm flash supporting files flashall, rawprogram*, patch*, prog_fire*
+BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog_firehose*.elf flashall rawprogram*.xml patch*.xml"
+
 # delete all logs
 rm -rf $(dirname $(mktemp -u -t uc-db-builder-XXXX))/uc-db-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-db-builder-XXXX)"
