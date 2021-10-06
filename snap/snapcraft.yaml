@@ -1,5 +1,4 @@
 name: uc-image
-version: "4.2.0"
 summary: Custom ubuntu core image buider
 description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
@@ -7,6 +6,7 @@ description: |
 
 confinement: strict
 grade: stable
+adopt-info: glue
 
 environment:
     PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$SNAP/${SNAPCRAFT_ARCH_TRIPLET}/bin:$PATH:$SNAP/aarch64-linux-gnu/bin
@@ -83,6 +83,10 @@ parts:
   glue:
     plugin: dump
     source: glue
+    override-build: |
+      snapcraftctl build
+      version=$(grep -m 1 "SCRIPT_VERSION=" ${SNAPCRAFT_PART_INSTALL}/bin/uc-image | awk -F '=' '{print $2}')
+      snapcraftctl set-version ${version}
 
   snap-client:
     plugin: nil
