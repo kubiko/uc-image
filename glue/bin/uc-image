@@ -89,9 +89,6 @@ print_help () {
     echo "                        Auto import assertion file to be included in root of main writable partiton."
     echo "                        This assertion is imported once system is fully seeded"
     echo "                        Passed file does not need to have correct file name, it will be renamed"
-    echo "  --hooks-directory DIRECTORY"
-    echo "                        Path of directory in which scripts for build-time hooks will be located."
-    echo "                        see ubuntu-image help for more information"
     echo "  -O DIRECTORY, --output-dir DIRECTORY"
     echo "                        The directory in which to put generated disk image"
     echo "                        files."
@@ -477,22 +474,6 @@ seed_auto_import_assertion () {
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
     cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/auto-import.assert
-  fi
-}
-
-# invoke custom hooks if provided
-# if no hook directory is passed do nothing
-invoke_hooks () {
-  print_debug 5 "invoke_hooks"
-  if [ -n "${HOOK_DIR}" ]; then
-    print_debug 1 "\nInvoking hooks"
-    export UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})"
-    if [ -f ${HOOK_DIR}/post-populate-rootfs ]; then
-      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})" ${HOOK_DIR}/post-populate-rootfs
-    fi
-    if [ -d ${HOOK_DIR}/post-populate-rootfs.d ]; then
-      UBUNTU_IMAGE_HOOK_ROOTFS="$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]})" find ${HOOK_DIR}/post-populate-rootfs.d -type f -executable -exec sh -c {} \;
-    fi
   fi
 }
 
@@ -892,15 +873,6 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
-        --hooks-directory)
-            if [ -n "$2" ] && [ -d $2 ];then
-                HOOK_DIR="$(readlink -f ${2})"
-            else
-                print_debug 0 "wrong hooks dir was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
         --network-config)
             f=$(validate_file ${2})
             if [ -n "${f}" ] && [ -f ${f} ]; then
@@ -1093,8 +1065,6 @@ if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
     seed_netplan_config
     # seed auto import assertion if provided
     seed_auto_import_assertion
-    # invoke custom hooks if provided
-    invoke_hooks
     # disable console conf if requested
     disable_console_conf
     # enable early getty if requested
@@ -1116,7 +1086,6 @@ else
        || [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ] \
        || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
        || [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ] \
-       || [ -n "${HOOK_DIR}" ] \
        || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
        || [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ] \
