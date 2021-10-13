@@ -113,7 +113,6 @@ print_help () {
     echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --build-raw            Build raw image, instead of sparse one"
     echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
-    echo " --build-uuu            Instead of file system images, build tarbal representing each volume (handy for uuu flashing)"
     echo " --use-android-fs-tools Use android make_ext4fs instead of mkfs.ext4"
     echo " --build-seed-image     Build compressed ubuntu-seed fs image release"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
@@ -630,53 +629,41 @@ create_disk_image() {
   local volume_image="${2}"
   local volume_label="${3}"
   local volume_size="${4}"
-  # build ext4 filesystem or tarball
-  if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} tar --numeric-owner --group=0 --owner=0 -czf ${volume_image}.tar.gz -C ${volume_source} ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]} tar \
-        --numeric-owner \
-        --group=0 \
-        --owner=0 \
-        -czf \
-        ${volume_image}.tar.gz \
-        -C ${volume_source} \
-        .
-  else # build ext4 disk image
-    if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
-      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
-      ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
-         -L ${volume_label} \
-         -l ${volume_size} \
-         -s \
-         ${volume_image}.img \
-         ${volume_source}
+  # build ext4 disk image
+  if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
+    ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
+       -L ${volume_label} \
+       -l ${volume_size} \
+       -s \
+       ${volume_image}.img \
+       ${volume_source}
+  else
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+    ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
+      -O \
+      -metadata_csum \
+      -T default \
+      -E root_owner=0:0 \
+      -O uninit_bg \
+      -L ${volume_label} \
+      -d ${volume_source} ${volume_image}.raw \
+      ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+    if [ ! -f ${volume_image}.raw ]; then
+      print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
+      exit 0
+    fi
+    # build sparse if needed
+    if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
+      print_debug 1 "\nCompressing image for ${volume_label}"
+      print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
+      xz -c ${volume_image}.raw  > ${volume_image}.img.xz
     else
-      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-      ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
-        -O \
-        -metadata_csum \
-        -T default \
-        -E root_owner=0:0 \
-        -O uninit_bg \
-        -L ${volume_label} \
-        -d ${volume_source} ${volume_image}.raw \
-        ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-      if [ ! -f ${volume_image}.raw ]; then
-        print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
-        exit 0
-      fi
-      # build sparse if needed
-      if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
-        print_debug 1 "\nCompressing image for ${volume_label}"
-        print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
-        xz -c ${volume_image}.raw  > ${volume_image}.img.xz
-      else
-        print_debug 1 "\nCreate sparse image for ${volume_label}"
-        print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
-        img2simg \
-          ${volume_image}.raw \
-          ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-      fi
+      print_debug 1 "\nCreate sparse image for ${volume_label}"
+      print_debug 2 "img2simg $${volume_image}.raw ${volume_image}.img"
+      img2simg \
+        ${volume_image}.raw \
+        ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
     fi
   fi
 }
@@ -697,30 +684,17 @@ create_system_boot_partition_image () {
     fi
   fi
   print_debug 1 "\nCreating image for system-boot"
-  if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} tar --numeric-owner --group=0 --owner=0 -czf ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.tar.gz -C ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/"
-    ${BUILDER_CONFIG["FAKEROOT"]} tar \
-        --numeric-owner \
-        --group=0 \
-        --owner=0 \
-        -czf \
-        ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.tar.gz \
-        -C ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ \
-        .
-  else # [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]
-      print_debug 1 "\nCreating system-boot partition"
-      dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=131072
-      ${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat \
-          -s 1 \
-          -S 512 \
-          -F 32 \
-          -n 'system-boot' \
-          ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-      mcopy \
-          -s \
-          -i ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img \
-          ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/* :: 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  fi # [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]
+  dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=131072
+  ${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat \
+      -s 1 \
+      -S 512 \
+      -F 32 \
+      -n 'system-boot' \
+      ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  mcopy \
+      -s \
+      -i ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img \
+      ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/* :: 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
 }
 
 # create seed partition image
@@ -817,19 +791,6 @@ copy_release_files () {
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-  fi
-  # handle special uuu case
-  if [ "${BUILDER_CONFIG["BUILD_UUU"]}" = "true" ]; then
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/*.tar.gz \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}
-    # copy out also kernel, dtb, u-boot and u-boot env, needed for flashing process
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/*/kernel.img \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/uboot.env \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}
-    find ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/ \
-       -name ${BUILDER_CONFIG["DTB"]} \
-       -exec cp {} ${BUILDER_CONFIG["OUTPUT_DIR"]} \;
   fi
 }
 
@@ -1001,9 +962,6 @@ while [ "$1" != "" ]; do
             ;;
         --build-raw)
             BUILDER_CONFIG["BUILD_RAW"]="true"
-            ;;
-        --build-uuu)
-            BUILDER_CONFIG["BUILD_UUU"]="true"
             ;;
         --use-android-fs-tools)
             BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
