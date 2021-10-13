@@ -106,8 +106,6 @@ print_help () {
     echo "                        !!! this option cannot be guaranteed !!!"
     echo "                            use only on your own risk!"
     echo "                            intended for device enablement phase"
-    echo " --full-size            Writable partition is build to full size to occupy rest of the available space on storage"
-    echo "                        This is usefull when writable partition should not be resized at first boot"
     echo " --keep-raw             Keep raw writable image as well as sparse image used by fastboot"
     echo "                        fastboot typically expects sparse image for ext4 partitions, to minimise size of the"
     echo "                        image to be flashed."
@@ -744,24 +742,14 @@ create_seed_partition_image () {
 create_writable_partition_image () {
   # root partition is "writable"
   print_debug 1 "\nCreating image for writable"
-
-  if [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]; then
-    print_debug 1 "Calculating size required for writable partition"
-    # db410c storage is: 7818182656 bytes (15269854)
-    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2))}')"
-    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)*512)}')B"
-    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2)/2)}')K"
-    local ROOT_SIZE="$(sgdisk -p ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin 2>&1 | grep writable | awk '{printf("%.0f",(15269854-$2-51200)/2048)}')M"
-  else # [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]
-    print_debug 1 "Calculating required size of writable partition image"
-    # make root size bigger by what be needed for boot backup
-    # local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
-    print_debug 3 "IMAGE_ROOT=${BUILDER_CONFIG["IMAGE_ROOT"]}"
-    du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}
-    local root_size=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]} | awk '{print $1}')
-    # add 20M buffer
-    ROOT_SIZE=$(echo ${root_size} | awk '{printf("%.0f",($1+20))}')M
-  fi # [ "${BUILDER_CONFIG["BUILD_FULL_SIZE"]}" = "true" ]
+  print_debug 2 "Calculating required size of writable partition image"
+  # make root size bigger by what be needed for boot backup
+  # local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
+  print_debug 3 "IMAGE_ROOT=${BUILDER_CONFIG["IMAGE_ROOT"]}"
+  du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}
+  local root_size=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]} | awk '{print $1}')
+  # add 20M buffer
+  ROOT_SIZE=$(echo ${root_size} | awk '{printf("%.0f",($1+20))}')M
   print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
@@ -1003,9 +991,6 @@ while [ "$1" != "" ]; do
                 exit
             fi
             shift
-            ;;
-        --full-size)
-            BUILDER_CONFIG["BUILD_FULL_SIZE"]="true"
             ;;
         --help | -h)
             print_help
