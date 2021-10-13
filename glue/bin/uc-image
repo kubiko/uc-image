@@ -106,11 +106,6 @@ print_help () {
     echo "                        !!! this option cannot be guaranteed !!!"
     echo "                            use only on your own risk!"
     echo "                            intended for device enablement phase"
-    echo " --keep-raw             Keep raw writable image as well as sparse image used by fastboot"
-    echo "                        fastboot typically expects sparse image for ext4 partitions, to minimise size of the"
-    echo "                        image to be flashed."
-    echo "                        Raw images are needed when QFIL or qdl flash tools are used"
-    echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --build-raw            Build raw image, instead of sparse one"
     echo "                        Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --use-android-fs-tools Use android make_ext4fs instead of mkfs.ext4"
@@ -754,10 +749,6 @@ copy_release_files () {
     if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img ]; then
       mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img \
          ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-      if [ "${BUILDER_CONFIG["KEEP_RAW"]}" = "true" ]; then
-        mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.raw \
-           ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-      fi
     fi
     # check also for imx.xz
     if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz ]; then
@@ -956,9 +947,6 @@ while [ "$1" != "" ]; do
         --help | -h)
             print_help
             exit
-            ;;
-        --keep-raw)
-            BUILDER_CONFIG["KEEP_RAW"]="true"
             ;;
         --build-raw)
             BUILDER_CONFIG["BUILD_RAW"]="true"
