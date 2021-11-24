@@ -34,7 +34,6 @@ apps:
             - ssh-public-keys
 
 architectures:
-    - build-on: armhf
     - build-on: arm64
     - build-on: amd64
 
@@ -114,37 +113,37 @@ parts:
       cp /snap/core18/current/etc/ssh/sshd_config ${SNAPCRAFT_PART_INSTALL}/etc/ssh
 
   gcc:
-    plugin: dump
-    source: https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/8.2-2018.08/gcc-arm-8.2-2018.08-x86_64-aarch64-linux-gnu.tar.xz
-    source-type: tar
-    override-pull: |
-      if [ "${SNAP_ARCH}" = "amd64" ]; then
-        snapcraftctl pull
+    plugin: nil
+    override-build: |
+      # for native case, we need to rename things, to maintain same build scripts
+      if [ "${SNAP_ARCH}" == "arm64" ]; then
+        release="gcc-linaro-10.2.1-2021.04-aarch64_aarch64-unknown-linux-gnu"
+        url="https://snapshots.linaro.org/gnu-toolchain/10.2-2021.04-1/native/${release}.tar.xz"
       else
-        # we need to fake empty files as minimum here, so staging part is happy
-        # tool is not expected to work for "exotic" image build on other than amd64 platform
-        for f in \
-              aarch64-linux-gnu/bin/as \
-              aarch64-linux-gnu/bin/ld \
-              bin/aarch64-linux-gnu-gcc \
-              bin/aarch64-linux-gnu-objcopy \
-              bin/aarch64-linux-gnu-strip \
-              libexec/gcc/aarch64-linux-gnu/8/cc1 \
-              libexec/gcc/aarch64-linux-gnu/8/liblto_plugin.so
-        do
-          mkdir -p "$(dirname ${f})" && touch "${f}"
-        done
+        release="gcc-linaro-10.2.1-2021.04-x86_64_aarch64-linux-gnu"
+        url="https://snapshots.linaro.org/gnu-toolchain/10.2-2021.04-1/aarch64-linux-gnu/${release}.tar.xz"
       fi
-    stage:
-      - aarch64-linux-gnu/bin/as
-      - aarch64-linux-gnu/bin/ld
-      - bin/aarch64-linux-gnu-gcc
-      - bin/aarch64-linux-gnu-objcopy
-      - bin/aarch64-linux-gnu-strip
-      - libexec/gcc/aarch64-linux-gnu/*/cc1
-      - libexec/gcc/aarch64-linux-gnu/*/liblto_plugin.so*
+      wget -c ${url} -O - | tar -xJ \
+            --strip-components=1 \
+            -C ${SNAPCRAFT_PART_INSTALL} \
+            --wildcards "*/aarch64*-linux-gnu/bin/as" \
+            --wildcards "*/aarch64*-linux-gnu/bin/ld" \
+            --wildcards "*/bin/aarch64*-linux-gnu-gcc" \
+            --wildcards "*/bin/*objcopy" \
+            --wildcards "*/bin/*strip" \
+            --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/cc1" \
+            --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/liblto_plugin.so*"
+      if [ "${SNAP_ARCH}" == "arm64" ]; then
+        mv ${SNAPCRAFT_PART_INSTALL}/aarch64-unknown-linux-gnu ${SNAPCRAFT_PART_INSTALL}/aarch64-linux-gnu
+        mv ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-unknown-linux-gnu-gcc ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-gcc
+        mv ${SNAPCRAFT_PART_INSTALL}/bin/objcopy ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-objcopy
+        mv ${SNAPCRAFT_PART_INSTALL}/bin/strip ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-strip
+      fi
 
   android-mkfs-tools:
     plugin: nil
     stage-packages:
       - android-sdk-ext4-utils
+
+build-packages:
+  - wget
