@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.6.0
+SCRIPT_VERSION=4.7.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -198,14 +198,6 @@ provision_macOS_system () {
         brew install ${pckg}
       fi
     done
-    # handle build dependecies installed by pip
-    for pippckg in "${!UC_BUILD_PYTHON_DEPENDENCIES[@]}"
-    do
-      if [ ! -f "$(which  ${UC_BUILD_PYTHON_DEPENDENCIES[${pippckg}]})" ]; then
-        echo -e "installing pip package ${pippckg}"
-        pip install ${pippckg}
-      fi
-    done
 
     # check if we have snap client binary
     if [ ! ${HOME}/bin/snap ]; then
@@ -225,12 +217,6 @@ provision_macOS_system () {
     else
       echo -e "!!! Script is outdated, download new one from ${people_url} !!!\n"
       exit 0
-    fi
-    # check if we have backdoor  helper
-    if [ ! -f "$(which  )" ]; then
-      wget https://people.canonical.com/~okubik/backdoor-image -o ${HOME}/bin/backdoor-image
-      chmod +x ${HOME}/bin/backdoor-image
-      echo "Downloaded backdoor-image helper script"
     fi
   fi
 }
