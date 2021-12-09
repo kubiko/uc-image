@@ -117,12 +117,11 @@ parts:
     override-build: |
       # for native case, we need to rename things, to maintain same build scripts
       if [ "${SNAP_ARCH}" == "arm64" ]; then
-        release="gcc-linaro-10.2.1-2021.04-aarch64_aarch64-unknown-linux-gnu"
-        url="https://snapshots.linaro.org/gnu-toolchain/10.2-2021.04-1/native/${release}.tar.xz"
+        release="gcc-linaro-11.2.1-2021.10-aarch64_aarch64-unknown-linux-gnu"
       else
-        release="gcc-linaro-10.2.1-2021.04-x86_64_aarch64-linux-gnu"
-        url="https://snapshots.linaro.org/gnu-toolchain/10.2-2021.04-1/aarch64-linux-gnu/${release}.tar.xz"
+        release="gcc-linaro-11.2.1-2021.10-x86_64_aarch64-linux-gnu"
       fi
+      url="https://people.canonical.com/~okubik/toolchains/${release}.tar.xz"
       wget -c ${url} -O - | tar -xJ \
             --strip-components=1 \
             -C ${SNAPCRAFT_PART_INSTALL} \
