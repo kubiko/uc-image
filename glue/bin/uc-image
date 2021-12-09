@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.9.0
+SCRIPT_VERSION=4.10.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -807,18 +807,35 @@ run_amba_image_build () {
 
 # generate image manifest
 generate_manifest () {
-  # create image manifest
   local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
-  if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model ]; then
-      sed '1,/timestamp/!d' ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
-  fi
-  if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml ]; then
-      sed -e '/snap-id:/d' \
-          -e '/contact:/d' \
-          -e 's/snaps:/seeded snaps:/g' \
-          -e 's/file:.*_\(.*\).snap/revision: \1/' \
-          ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml \
-        >> ${IMAGE_MANIFEST}
+  if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+    if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model ]; then
+        sed '1,/timestamp/!d' ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
+    fi
+    if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml ]; then
+        sed -e '/snap-id:/d' \
+            -e '/contact:/d' \
+            -e 's/snaps:/seeded snaps:/g' \
+            -e 's/file:.*_\(.*\).snap/revision: \1/' \
+            ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml \
+          >> ${IMAGE_MANIFEST}
+    fi
+  else
+    echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
+    echo -e "$(date)" >> ${IMAGE_MANIFEST}
+    echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
+    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
+      >> ${IMAGE_MANIFEST}
+    echo -e "\n### Snap revissions ###" >> ${IMAGE_MANIFEST}
+    grep -A7 "type: snap-revision" ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/assertions/snaps \
+      >> ${IMAGE_MANIFEST}
+    echo -e "\n### Model assertion ###" >> ${IMAGE_MANIFEST}
+    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/model >> ${IMAGE_MANIFEST}
+    echo -e "\n### snap checksums ###" >> ${IMAGE_MANIFEST}
+    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
   fi
 }
 
