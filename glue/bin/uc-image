@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.10.1
+SCRIPT_VERSION=4.10.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -832,10 +832,14 @@ generate_manifest () {
     echo -e "\n### Model assertion ###" >> ${IMAGE_MANIFEST}
     cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/model >> ${IMAGE_MANIFEST}
     echo -e "\n### snap checksums ###" >> ${IMAGE_MANIFEST}
-    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
-      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
-    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
-      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
+      sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
+        | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+    fi
+    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap 1> /dev/null 2>&1; then
+      sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
+        | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+    fi
   fi
 }
 
