@@ -851,6 +851,8 @@ generate_manifest () {
 # make sure system is ready before we even start parsing input
 provision_macOS_system
 
+# store invoked command
+print_debug "@$"
 # parse passed parameters
 while [ "$1" != "" ]; do
     case $1 in
