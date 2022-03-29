@@ -1079,6 +1079,9 @@ determine_bootloader
 # add build timestamp if provided
 disk_info_contents
 
+# seed auto import assertion if provided
+seed_auto_import_assertion
+
 # for UC20 there are no additional image modifications supported yet
 if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
     # seed cloud init user_data if provided
@@ -1087,8 +1090,6 @@ if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
     seed_cloud_init_net_config
     # seed netplan network config if provided
     seed_netplan_config
-    # seed auto import assertion if provided
-    seed_auto_import_assertion
     # disable console conf if requested
     disable_console_conf
     # enable early getty if requested
@@ -1109,7 +1110,6 @@ else
     if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ] \
        || [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ] \
        || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
-       || [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
        || [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ] \
