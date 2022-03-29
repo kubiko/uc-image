@@ -605,15 +605,15 @@ create_disk_image() {
   local volume_size="${4}"
   # build ext4 disk image
   if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
     ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
        -L ${volume_label} \
        -l ${volume_size} \
        -s \
        ${volume_image}.img \
-       ${volume_source}
+       ${volume_source} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   else
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
     ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
       -O \
       -metadata_csum \
@@ -640,6 +640,11 @@ create_disk_image() {
         ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
     fi
   fi
+  if [ ! -f ${volume_image}.img ]; then
+    print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
+    exit 0
+  fi
+
 }
 
 # create system-boot partition if needed
