@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.10.2
+SCRIPT_VERSION=4.11.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -32,7 +32,7 @@ else
 fi
 
 # fill in default values
-BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-db-build)"
+BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
 BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
 BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
 
@@ -49,7 +49,6 @@ rm -rf $(dirname $(mktemp -u -t uc-image-builder-XXXX))/uc-image-builder-* 2> /d
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
 [ -n "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
-[ -n "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f ${DB_BUILDER_OUTPUT_DIR})
 
 # boot assets candidate directories in gadget snap
 BOOT_ASSETS_CANDIDATES="blobs boot-assets assets"
@@ -157,7 +156,7 @@ print_help () {
     echo "    DB_BUILDER_WORK_DIR:   Default work directory to be used"
     echo "                           If not defined or passed as param, tmp directory is created"
     echo "    DB_BUILDER_OUTPUT_DIR: Default output directory"
-    echo "                           If not defined or passed as param, 'uc-db-build' directory will be created in current directory"
+    echo "                           If not defined or passed as param, 'uci-<model name>' directory will be created in current directory"
 }
 
 # normalize version
@@ -282,11 +281,11 @@ print_builder_config () {
 # prepare work directory
 prepare_work_directory () {
   # first clean previus tmp directories
-  rm -rf $(dirname $(mktemp -u -d -t uc-db-workdir-XXXXX))/uc-db-workdir-*
+  rm -rf $(dirname $(mktemp -u -d -t uc-i-workdir-XXXXX))/uc-i-workdir-*
   # if work directory is not defined, use tmp one
   if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
     # work dir not defined create tmp one
-    BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-db-workdir-XXXX)
+    BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-i-workdir-XXXX)
     mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}
     print_debug 2 "Creating temp work directory: ${BUILDER_CONFIG["WORK_DIR"]}"
   else
@@ -299,23 +298,17 @@ prepare_work_directory () {
   fi
 }
 
-# dtermine if we are building for UC20
-determine_uc2x() {
-  print_debug 3 "determine_uc2x"
+# parse model assertion
+parse_model_asseertion() {
+  print_debug 3 "parse_model_asseertion"
+  # determine Ubuntu Core version based on the base snap
+
   # we can have true uc20 and we can have uc20 with disk and boot as uc16/18
   # grade keyword is only defined for tru uc20
-  if [ -n "$(grep 'base: core20' ${BUILDER_CONFIG["MODEL_ASSERTION"]} 2> /dev/null)" ]; then
-    if [ -n "$(grep '^grade:' ${BUILDER_CONFIG["MODEL_ASSERTION"]} 2> /dev/null)" ]; then
-      print_debug 2 "Target Ubuntu Core 20+ detected"
-      BUILDER_CONFIG["UC20"]="true"
-    else
-      print_debug 2 "Target Ubuntu Core 20 with UC18 disk and boot style!!"
-      BUILDER_CONFIG["UC20"]="false"
-    fi
-  else
-    print_debug 2 "Target PRE Ubuntu Core 20 detected"
-    BUILDER_CONFIG["UC20"]="false"
-  fi
+  BUILDER_CONFIG["UC_VERSION"]="$(sed -n 's/^base: core\(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
+  print_debug 2 "Determined Ubuntu Core version: ${BUILDER_CONFIG["UC_VERSION"]}"
+  BUILDER_CONFIG["MODEL"]="$(sed -n 's/^model: \(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
+  print_debug 2 "Determined model name: ${BUILDER_CONFIG["MODEL"]}"
 }
 
 # determine bootloader type
@@ -334,7 +327,7 @@ determine_bootloader () {
   BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
   print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
   # UC20 behaves differently from UC16/18
-  if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
     BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
   else
     BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/image
@@ -346,7 +339,7 @@ determine_bootloader () {
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
-    if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
       mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
     fi
     # check if we have defined dtb
@@ -366,7 +359,7 @@ determine_bootloader () {
     exit 0
   fi
 
-  if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
     # set new image root
     BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/root
@@ -492,7 +485,7 @@ disk_info_contents () {
   print_debug 5 "disk_info_contents(${BUILDER_CONFIG["DISK_INFO_CONTENTS"]})"
   if [ -n "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" ]; then
     print_debug 1 "\nUsing passed disk info contents: [${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}]"
-    if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
       mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk
       cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info
     else
@@ -813,7 +806,7 @@ run_amba_image_build () {
 # generate image manifest
 generate_manifest () {
   local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
-  if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model ]; then
         sed '1,/timestamp/!d' ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
     fi
@@ -828,6 +821,7 @@ generate_manifest () {
   else
     echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
     echo -e "$(date)" >> ${IMAGE_MANIFEST}
+    echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
     echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
     cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
       >> ${IMAGE_MANIFEST}
@@ -852,7 +846,7 @@ generate_manifest () {
 provision_macOS_system
 
 # store invoked command
-print_debug "@$"
+BUILDER_CONFIG["ARGS"]="$@"
 # parse passed parameters
 while [ "$1" != "" ]; do
     case $1 in
@@ -1050,6 +1044,9 @@ while [ "$1" != "" ]; do
     shift
 done
 
+parse_model_asseertion
+[ -n "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
+
 # check we have all the permissions
 check_snap_environment
 
@@ -1072,7 +1069,6 @@ BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
 # merge logs
 mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
 # determine bootloader
-determine_uc2x
 determine_bootloader
 
 # updated seeded image per passed configurations
@@ -1083,7 +1079,7 @@ disk_info_contents
 seed_auto_import_assertion
 
 # for UC20 there are no additional image modifications supported yet
-if [ "${BUILDER_CONFIG["UC20"]}" != "true" ]; then
+if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # seed cloud init user_data if provided
     seed_cloud_init_user_data
     # seed cloud init network config if provided
@@ -1129,7 +1125,7 @@ fi
 mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
 
 # UC16/18 can have custom or normal part schema
-if [ "${BUILDER_CONFIG["UC20"]}" = "true" ]; then
+if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
   # create ubuntu-seed image
   create_uc20_seed_partition_image
 else
