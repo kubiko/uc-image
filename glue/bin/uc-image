@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.0
+SCRIPT_VERSION=4.11.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -464,7 +464,13 @@ seed_auto_import_assertion () {
   print_debug 5 "seed_auto_import_assertion(${BUILDER_CONFIG["ASSERTION_IMPORT"]})"
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
-    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/auto-import.assert
+    # based on the UC version, determine location
+    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
+      cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/auto-import.assert
+    else
+      local system=$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*)
+      cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${system}/auto-import.assert
+    fi
   fi
 }
 
