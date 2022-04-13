@@ -597,53 +597,89 @@ create_backdoor() {
 # - target volume image, without file type, it will be added
 # - volume label
 # - volume size
+# - volume filesystem (vfat or ext4)
 create_disk_image() {
   local volume_source="${1}"
   local volume_image="${2}"
   local volume_label="${3}"
   local volume_size="${4}"
-  # build ext4 disk image
-  if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
-       -L ${volume_label} \
-       -l ${volume_size} \
-       -s \
-       ${volume_image}.img \
-       ${volume_source} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  else
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-    ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
-      -O \
-      -metadata_csum \
-      -T default \
-      -E root_owner=0:0 \
-      -O uninit_bg \
-      -L ${volume_label} \
-      -d ${volume_source} ${volume_image}.raw \
-      ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-    if [ ! -f ${volume_image}.raw ]; then
-      print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
-      exit 0
-    fi
-    # build sparse if needed
-    if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
-      print_debug 1 "\nCompressing image for ${volume_label}"
-      print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
-      xz -c ${volume_image}.raw  > ${volume_image}.img.xz
-    else
-      print_debug 1 "\nCreate sparse image for ${volume_label}"
-      print_debug 2 "img2simg ${volume_image}.raw ${volume_image}.img"
-      img2simg \
-        ${volume_image}.raw \
-        ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-    fi
+  local volume_fs="${5}"
+
+  # If the filesystem hasn't been specified, use ext4
+  if [ -z "${volume_fs}" ] || [ "${volume_fs}" == "null" ]; then
+    volume_fs = "ext4"
   fi
+
+  if [ "${volume_fs}" == "ext4" ]; then
+    # build ext4 disk image
+    if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
+      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
+      ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
+        -L ${volume_label} \
+        -l ${volume_size} \
+        -s \
+        ${volume_image}.img \
+        ${volume_source} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+    else
+      print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+      ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
+        -O \
+        -metadata_csum \
+        -T default \
+        -E root_owner=0:0 \
+        -O uninit_bg \
+        -L ${volume_label} \
+        -d ${volume_source} ${volume_image}.raw \
+        ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+
+      create_output_image ${volume_image} ${volume_label}
+    fi
+  elif [ "${volume_fs}" == "vfat" ]; then
+      local cmd="${BUILDER_CONFIG["FAKEROOT"]} dd if=/dev/zero of=${volume_image}.raw bs=1k count=$(echo ${volume_size} | cut -f 1 -d k)"
+      print_debug 2 "${cmd}"
+      ${cmd}
+
+      cmd="${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat -n ${volume_label} ${volume_image}.raw"
+      print_debug 2 "${cmd}"
+      ${cmd}
+
+      cmd="${BUILDER_CONFIG["FAKEROOT"]} mcopy -Qs -i ${volume_image}.raw ${volume_source}/* ::"
+      print_debug 2 "${cmd}"
+      ${cmd}
+
+      create_output_image ${volume_image} ${volume_label}
+  else
+      print_debug 1 "\nImage creation for ${volume_label} partiton failed: unsupported filesystem: ${volume_fs}"
+      exit -1
+  fi
+
   if [ ! -f ${volume_image}.img ]; then
     print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
     exit 0
   fi
+}
 
+create_output_image() {
+  local volume_image="${1}"
+  local volume_label="${2}"
+
+  # build sparse if needed
+  if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
+    print_debug 1 "\nCompressing image for ${volume_label}"
+    print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
+    xz -c ${volume_image}.raw  > ${volume_image}.img.xz
+  else
+    print_debug 1 "\nCreate sparse image for ${volume_label}"
+    print_debug 2 "img2simg ${volume_image}.raw ${volume_image}.img"
+    img2simg \
+      ${volume_image}.raw \
+      ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  fi
+
+  if [ ! -f ${volume_image}.raw ]; then
+    print_debug 1 "\nImage creation for ${volume_label} partiton failed, bailing out!!!"
+    exit 0
+  fi
 }
 
 # create system-boot partition if needed
@@ -682,12 +718,14 @@ create_seed_partition_image () {
 
   local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
+  local fs=$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .filesystem' ${BUILDER_CONFIG["GADGET_YAML"]})
 
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/seed \
       "seed" \
-      ${SEED_SIZE}
+      ${SEED_SIZE} \
+      ${fs}
 }
 
 # create writable partition image
@@ -717,12 +755,14 @@ create_uc20_seed_partition_image () {
   # calculate ubuntu-seed part size
   local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
+  local fs=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .filesystem' ${BUILDER_CONFIG["GADGET_YAML"]})
 
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed \
       "ubuntu-seed" \
-      ${SEED_SIZE}
+      ${SEED_SIZE} \
+      ${fs}
 }
 
 copy_release_files () {
