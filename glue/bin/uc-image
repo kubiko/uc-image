@@ -110,10 +110,6 @@ print_help () {
     echo "Following options are only available to Ubuntu Core 16 and 18 images"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
     echo "                        Network config for netplan, should not be combined with --network-config"
-    echo "  --cloud-init USER-DATA-FILE"
-    echo "                        cloud-config data to be copied to the image"
-    echo "  --network-config NETWORK-CONFIG-FILE"
-    echo "                        Network config for cloud init"
     echo "  --disable-console-conf"
     echo "                        disable first boot console configuration"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
@@ -412,30 +408,6 @@ normalise_size_to_kb () {
      (*) size=$(expr $size / 1024) ;;
   esac
   echo ${size}
-}
-
-# seed cloud init user_data
-# if no cloud init user data is passed do nothing
-seed_cloud_init_user_data () {
-  print_debug 5 "seed_cloud_init_user_data(${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]})"
-  if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ]; then
-    print_debug 1 "\nUsing passed cloud init user data configuration: [${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}]"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/user-data
-    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/meta-data
-  fi
-}
-
-# seed cloud init network config
-# if no cloud init network config is passed do nothing
-seed_cloud_init_net_config () {
-  print_debug 5 "seed_cloud_init_net_config(${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]})"
-  if [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ]; then
-    print_debug 1 "\nUsing passed cloud init network configuration: [${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}]"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net
-    cp ${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/network-config
-    echo "instance-id: nocloud-static" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/cloud/seed/nocloud-net/meta-data
-  fi
 }
 
 # seed netplan network config if provided
@@ -862,26 +834,6 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
-        --cloud-init)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]="${f}"
-            else
-                print_debug 0 "wrong cloud init user data file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --network-config)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]="${f}"
-            else
-                print_debug 0 "wrong network config for cloud init was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
         --auto-import-assertion)
             f=$(validate_file ${2})
             if [ -n "${f}" ] && [ -f ${f} ]; then
@@ -1042,10 +994,6 @@ seed_auto_import_assertion
 
 # for UC20 there are no additional image modifications supported yet
 if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-    # seed cloud init user_data if provided
-    seed_cloud_init_user_data
-    # seed cloud init network config if provided
-    seed_cloud_init_net_config
     # seed netplan network config if provided
     seed_netplan_config
     # disable console conf if requested
@@ -1059,9 +1007,7 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # Create backdoor if defined
     create_backdoor
 else
-    if [ -n "${BUILDER_CONFIG["CLOUD_INIT_USER_DATA"]}" ] \
-       || [ -n "${BUILDER_CONFIG["CLOUD_INIT_NETWORK_CONFIG"]}" ] \
-       || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
+    if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
