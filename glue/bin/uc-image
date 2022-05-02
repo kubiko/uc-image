@@ -116,11 +116,6 @@ print_help () {
     echo "                        Network config for cloud init"
     echo "  --disable-console-conf"
     echo "                        disable first boot console configuration"
-    echo "  -o, --overlay"
-    echo "                        Directory to overlay on top of rootfs"
-    echo "                        !!! this option cannot be guaranteed !!!"
-    echo "                            use only on your own risk!"
-    echo "                            intended for device enablement phase"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
     echo "     --import-id U      backdoor: use 'ssh-import-id' to get ssh public keys"
     echo "                        may be used more than once."
@@ -569,16 +564,6 @@ seed_root_authorized_keys () {
   fi
 }
 
-# Apply custom overlay if there are some
-# if no custom overlay is passed do nothing
-seed_custom_overlay () {
-  print_debug 5 "seed_custom_overlay(${BUILDER_CONFIG["CUSTOM_OVERLAY"]})"
-  if [ -n "${BUILDER_CONFIG["CUSTOM_OVERLAY"]}" ];then
-    print_debug 1 "Applying custom overlay"
-    cp -r ${BUILDER_CONFIG["CUSTOM_OVERLAY"]}/* ${BUILDER_CONFIG["IMAGE_ROOT"]}
-  fi
-}
-
 # create backdoor into the image if defined
 create_backdoor() {
   print_debug 5 "create_backdoor(${BUILDER_CONFIG["BACKDOOR_USER"]}, ${BUILDER_CONFIG["BACKDOOR_PARAMS"]})"
@@ -945,16 +930,6 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
-        -o | --overlay)
-            if [ -n "${2}" ] && [ -d ${2} ]; then
-                BUILDER_CONFIG["CUSTOM_OVERLAY"]="$(${READLINK} -f ${2})"
-                print_debug 0 "!!! This function is not guaranteed, use on own risk !!!"
-            else
-                print_debug 0 "wrong overlay directory passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
         --help | -h)
             print_help
             exit
@@ -1116,8 +1091,6 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     seed_hostname
     # check if we should seed authorized ssh kyes for root user
     seed_root_authorized_keys
-    # Apply custom overlay if there are some
-    seed_custom_overlay
     # Create backdoor if defined
     create_backdoor
 else
@@ -1129,8 +1102,7 @@ else
        || [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ] \
        || [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
-       || [ -n "${SSH_PUB_KEY_FILES}" ] \
-       || [ -n "${BUILDER_CONFIG["CUSTOM_OVERLAY"]}" ]; then
+       || [ -n "${SSH_PUB_KEY_FILES}" ]; then
          echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
     fi
 fi
