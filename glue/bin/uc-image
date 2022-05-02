@@ -118,11 +118,6 @@ print_help () {
     echo "     --pubkeys F        backdoor: add public keys from file F"
     echo "                                  default: ~/.ssh/id_rsa.pub unless --password"
     echo "                                  or --import-id specified"
-    echo " --seed-root-ssh-authorized-keys"
-    echo "                        populate root's authorized_keys (/root/.ssh/authorized_keys) with passed"
-    echo "                        public key(s)"
-    echo "                        example: --seed-root-ssh-authorized-keys <key 1> [key 2]"
-    echo "                        to enable early boot loggin, combine with use of --enable-early-getty"
     echo " --set-hostname HOSTNAME"
     echo "                        Set initial hostname to be used at first boot"
     echo "                        !!! This feature is not guarteed as it's using image overlay"
@@ -456,26 +451,6 @@ seed_hostname () {
     print_debug 1 "\nSetting initial hostname to [ ${BUILDER_CONFIG["HOSTNAME"]} ]"
     mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/
     echo ${BUILDER_CONFIG["HOSTNAME"]} > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/hostname
-  fi
-}
-
-# check if we should seed authorized ssh kyes for root user
-# if no root authorised keys are passed do nothing
-seed_root_authorized_keys () {
-  print_debug 5 "seed_root_authorized_keys(${SSH_PUB_KEY_FILES})"
-  if [ -n "${SSH_PUB_KEY_FILES}" ]; then
-    print_debug 1 "\nSeeding root authorized ssh keys [${SSH_PUB_KEY_FILES}]"
-    SSH_DIR="${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/root/.ssh"
-    mkdir -p ${SSH_DIR}
-    chmod 700 ${SSH_DIR}
-    AUTHORIZED_KEYS="${SSH_DIR}/authorized_keys"
-    for key in ${SSH_PUB_KEY_FILES}
-    do
-      if [ -f ${key} ]; then
-          cat ${key} >> ${AUTHORIZED_KEYS}
-      fi
-    done
-    chmod 600 ${AUTHORIZED_KEYS}
   fi
 }
 
@@ -835,23 +810,6 @@ while [ "$1" != "" ]; do
         --build-seed-image)
             BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
             ;;
-        --seed-root-ssh-authorized-keys)
-            # multiple keys can be passed, but at least one
-            while
-                f=$(validate_file ${2})
-                if [ -n "${f}" ] && [ -f ${f} ]; then
-                    SSH_PUB_KEY_FILES="${f} ${SSH_PUB_KEY_FILES}"
-                else
-                    break
-                fi
-                shift
-            do [ -z "${f}" ]; done
-            # we need at least one pub key file
-            if [ -z "${SSH_PUB_KEY_FILES}" ]; then
-                print_debug 0 "wrong ssh public key file was passed [ ${SSH_PUB_KEY_FILES} ]"
-                exit
-            fi
-            ;;
         --set-hostname)
             if [ -n "${2}" ]; then
                BUILDER_CONFIG["HOSTNAME"]="${2}"
@@ -958,16 +916,12 @@ seed_auto_import_assertion
 if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # seed netplan network config if provided
     seed_netplan_config
-    # check if system's ssh server should be disabled
     seed_hostname
-    # check if we should seed authorized ssh kyes for root user
-    seed_root_authorized_keys
     # Create backdoor if defined
     create_backdoor
 else
     if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
-       || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
-       || [ -n "${SSH_PUB_KEY_FILES}" ]; then
+       || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ]; then
          echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
     fi
 fi
