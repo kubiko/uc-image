@@ -123,10 +123,6 @@ print_help () {
     echo "                        public key(s)"
     echo "                        example: --seed-root-ssh-authorized-keys <key 1> [key 2]"
     echo "                        to enable early boot loggin, combine with use of --enable-early-getty"
-    echo " --enable-early-getty"
-    echo "                        Forcefull disabling of console conf and early enablement of getty"
-    echo "                        !!! Use this only for boot debugging, not suitable for production images"
-    echo "                        This option as consequence disables console-conf"
     echo " --set-hostname HOSTNAME"
     echo "                        Set initial hostname to be used at first boot"
     echo "                        !!! This feature is not guarteed as it's using image overlay"
@@ -449,21 +445,6 @@ disk_info_contents () {
       mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
       cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
     fi
-  fi
-}
-
-# enable early getty if requested
-# if no early getty is not requested, do nothing
-enable_early_getty () {
-  print_debug 5 "enable_early_getty(${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]})"
-  if [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ]; then
-    print_debug 1 "\nEnabling early getty"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/
-    ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/console-conf@.service
-    ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-console-conf@.service
-    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
-    echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
   fi
 }
 
@@ -871,9 +852,6 @@ while [ "$1" != "" ]; do
                 exit
             fi
             ;;
-        --enable-early-getty)
-            BUILDER_CONFIG["ENABLE_EARLY_GETTY"]="true"
-            ;;
         --set-hostname)
             if [ -n "${2}" ]; then
                BUILDER_CONFIG["HOSTNAME"]="${2}"
@@ -980,8 +958,6 @@ seed_auto_import_assertion
 if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # seed netplan network config if provided
     seed_netplan_config
-    # enable early getty if requested
-    enable_early_getty
     # check if system's ssh server should be disabled
     seed_hostname
     # check if we should seed authorized ssh kyes for root user
@@ -990,7 +966,6 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     create_backdoor
 else
     if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
-       || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
        || [ -n "${SSH_PUB_KEY_FILES}" ]; then
          echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
