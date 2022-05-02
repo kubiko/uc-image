@@ -124,8 +124,6 @@ print_help () {
     echo "     --pubkeys F        backdoor: add public keys from file F"
     echo "                                  default: ~/.ssh/id_rsa.pub unless --password"
     echo "                                  or --import-id specified"
-    echo " --journald-storage-persistent"
-    echo "                        Configure system to use persistent storage for journald logs instead of default volatile settings"
     echo " --disable-ssh-server"
     echo "                        Disable system's ssh server from very beginning of the first boot"
     echo " --seed-root-ssh-authorized-keys"
@@ -509,16 +507,6 @@ enable_early_getty () {
     ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-console-conf@.service
     echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
     echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
-  fi
-}
-
-# check if device should be configured with persistent journal storage
-# if no persistent journal is passed do nothing
-enable_persisten_journal () {
-  print_debug 5 "enable_persisten_journal(${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]})"
-  if [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ]; then
-    print_debug 1 "\nSwitching journald to use persistent storage"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/log/journal
   fi
 }
 
@@ -943,9 +931,6 @@ while [ "$1" != "" ]; do
         --build-seed-image)
             BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
             ;;
-        --journald-storage-persistent)
-            BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]="true"
-            ;;
         --disable-ssh-server)
             BUILDER_CONFIG["DISABLE_SSH_SERVER"]="true"
             ;;
@@ -1083,8 +1068,6 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     disable_console_conf
     # enable early getty if requested
     enable_early_getty
-    # check if device should be configured with persistent journal storage
-    enable_persisten_journal
     # check if system's ssh server should be disabled
     disable_ssh_server
     # check if we should set default hostname
@@ -1099,7 +1082,6 @@ else
        || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
-       || [ "${BUILDER_CONFIG["JOURNAL_STORAGE_PERSISTENT"]}" = "true" ] \
        || [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
        || [ -n "${SSH_PUB_KEY_FILES}" ]; then
