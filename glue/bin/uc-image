@@ -110,8 +110,6 @@ print_help () {
     echo "Following options are only available to Ubuntu Core 16 and 18 images"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
     echo "                        Network config for netplan, should not be combined with --network-config"
-    echo "  --disable-console-conf"
-    echo "                        disable first boot console configuration"
     echo " --backdoor U           Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
     echo "     --import-id U      backdoor: use 'ssh-import-id' to get ssh public keys"
     echo "                        may be used more than once."
@@ -435,17 +433,6 @@ seed_auto_import_assertion () {
       local system=$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*)
       cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${system}/auto-import.assert
     fi
-  fi
-}
-
-# disable console conf if requested
-# if disable console conf is not requested, do nothing
-disable_console_conf () {
-  print_debug 5 "disable_console_conf(${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]})"
-  if [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ]; then
-    print_debug 1 "\nDisabling console conf"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/console-conf
-    touch ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/console-conf/complete
   fi
 }
 
@@ -844,9 +831,6 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
-        --disable-console-conf)
-            BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]="true"
-            ;;
         --disk-info)
             f=$(validate_file ${2})
             if [ -n "${f}" ] && [ -f ${f} ]; then
@@ -996,8 +980,6 @@ seed_auto_import_assertion
 if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # seed netplan network config if provided
     seed_netplan_config
-    # disable console conf if requested
-    disable_console_conf
     # enable early getty if requested
     enable_early_getty
     # check if system's ssh server should be disabled
@@ -1008,7 +990,6 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     create_backdoor
 else
     if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
-       || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
        || [ -n "${SSH_PUB_KEY_FILES}" ]; then
