@@ -124,8 +124,6 @@ print_help () {
     echo "     --pubkeys F        backdoor: add public keys from file F"
     echo "                                  default: ~/.ssh/id_rsa.pub unless --password"
     echo "                                  or --import-id specified"
-    echo " --disable-ssh-server"
-    echo "                        Disable system's ssh server from very beginning of the first boot"
     echo " --seed-root-ssh-authorized-keys"
     echo "                        populate root's authorized_keys (/root/.ssh/authorized_keys) with passed"
     echo "                        public key(s)"
@@ -507,17 +505,6 @@ enable_early_getty () {
     ln -s /dev/null ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-console-conf@.service
     echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/serial-getty@.service.d/z-console-conf-serial.conf
     echo -e "[Service]\nExecStartPre=" > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/systemd/system/getty@.service.d/z-console-conf.conf
-  fi
-}
-
-# check if system's ssh server should be disabled
-# if disable ssh server is not requested do nothing
-disable_ssh_server () {
-  print_debug 5 "disable_ssh_server(${BUILDER_CONFIG["DISABLE_SSH_SERVER"]})"
-  if [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ]; then
-    print_debug 1 "\nDisabling system ssh server"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/ssh
-    touch ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/ssh/sshd_not_to_be_run
   fi
 }
 
@@ -931,9 +918,6 @@ while [ "$1" != "" ]; do
         --build-seed-image)
             BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
             ;;
-        --disable-ssh-server)
-            BUILDER_CONFIG["DISABLE_SSH_SERVER"]="true"
-            ;;
         --seed-root-ssh-authorized-keys)
             # multiple keys can be passed, but at least one
             while
@@ -1069,8 +1053,6 @@ if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     # enable early getty if requested
     enable_early_getty
     # check if system's ssh server should be disabled
-    disable_ssh_server
-    # check if we should set default hostname
     seed_hostname
     # check if we should seed authorized ssh kyes for root user
     seed_root_authorized_keys
@@ -1082,7 +1064,6 @@ else
        || [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["DISABLE_CONSOLE_CONF"]}" ] \
        || [ "true" = "${BUILDER_CONFIG["ENABLE_EARLY_GETTY"]}" ] \
-       || [ "${BUILDER_CONFIG["DISABLE_SSH_SERVER"]}" = "true" ] \
        || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ] \
        || [ -n "${SSH_PUB_KEY_FILES}" ]; then
          echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
