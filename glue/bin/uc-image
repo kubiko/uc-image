@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.2
+SCRIPT_VERSION=4.11.3
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -662,8 +662,13 @@ create_system_boot_partition_image () {
             ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/${target}
     fi
   fi
+  # calculate system-boot part size
+  local system_boot_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "system-boot") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
+  local SYSTEM_BOOT="$(normalise_size_to_kb ${system_boot_size_human})"
+
   print_debug 1 "\nCreating image for system-boot"
-  dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=131072
+  print_debug 2 "dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=${SYSTEM_BOOT}"
+  dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=${SYSTEM_BOOT}
   ${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat \
       -s 1 \
       -S 512 \
@@ -696,13 +701,19 @@ create_writable_partition_image () {
   # root partition is "writable"
   print_debug 1 "\nCreating image for writable"
   print_debug 2 "Calculating required size of writable partition image"
-  # make root size bigger by what be needed for boot backup
-  # local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
-  print_debug 3 "IMAGE_ROOT=${BUILDER_CONFIG["IMAGE_ROOT"]}"
-  du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}
-  local root_size=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]} | awk '{print $1}')
-  # add 20M buffer
-  ROOT_SIZE=$(echo ${root_size} | awk '{printf("%.0f",($1+20))}')M
+  # first check writable part size from gadget.yaml
+  local writable_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "writable") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
+  if [ -z "${writable_size_human}" ]; then
+    # make root size bigger by what be needed for boot backup
+    # local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
+    print_debug 3 "IMAGE_ROOT=${BUILDER_CONFIG["IMAGE_ROOT"]}"
+    du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}
+    local root_size=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]} | awk '{print $1}')
+    # add 20M buffer
+    local ROOT_SIZE=$(echo ${root_size} | awk '{printf("%.0f",($1+20))}')M
+  else
+    local ROOT_SIZE="$(normalise_size_to_kb ${writable_size_human})k"
+  fi
   print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
