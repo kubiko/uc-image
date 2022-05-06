@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.3
+SCRIPT_VERSION=4.11.5
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -77,6 +77,8 @@ print_help () {
     echo "                        The snap channel to use, one of stable/candidate/beta/edge"
     echo "                        stable channel is assumed if no channel is defined"
     echo "                        example: -c edge"
+    echo "  --preseed             Pressed the image (UC20 only)."
+    echo "  --preseed-sign-key    Name of the key to use to sign preseed assertion, otherwise use the default key"
     echo "  -d, --debug           print debug"
     echo "  -dd                   print verbose debugs"
     echo "  -v|--version"
@@ -224,7 +226,7 @@ check_snap_environment () {
   fi
 
   # check we are not running as root
-  if [ "$USER" =  "root" ]; then
+  if [ "$USER" =  "root" ] && [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
     echo "Please do not run with sudo, no need for this"
     exit 0
   fi
@@ -755,6 +757,13 @@ while [ "$1" != "" ]; do
             BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
             shift
             ;;
+        --preseed)
+            BUILDER_CONFIG["PRESEED"]="--preseed"
+            ;;
+        --preseed-sign-key)
+            BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key ${2}"
+            shift
+            ;;
         -O | --output-dir)
             BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f ${2})"
             if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
@@ -890,8 +899,8 @@ prepare_work_directory
 print_builder_config
 
 # run snap prepare image with all known parameters
-print_debug 1 "Running: snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
-if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}; then
+print_debug 1 "Running: snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}; then
   print_debug 0 "snap prepare-image failed, bailing out"
   exit
 fi
