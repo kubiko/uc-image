@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.5
+SCRIPT_VERSION=4.11.7
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -230,6 +230,13 @@ check_snap_environment () {
     echo "Please do not run with sudo, no need for this"
     exit 0
   fi
+
+  # if we are preseeding, we need to run as root
+  if [ "$USER" !=  "root" ] && [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
+    echo "Please run with sudo, preseeding requires mounting."
+    exit 0
+  fi
+
 }
 
 # print debug log
@@ -886,6 +893,15 @@ while [ "$1" != "" ]; do
     esac
     shift
 done
+
+# if we are trying to preseed, this cannot be realistically run in confinement
+if [ -n "${BUILDER_CONFIG["PRESEED"]}" ] && [ -n "${SNAP}" ]; then
+  echo -e "\n\n# presseding enabled, image with this option cannot be built confined"
+  echo -e "# run this command as"
+  echo -e "# <your existing uc-image command with all the args> | xargs -I {} bash -c \"{}\"\n\n"
+  echo -e "sudo -E env PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\" $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
+  exit
+fi
 
 parse_model_asseertion
 [ -n "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
