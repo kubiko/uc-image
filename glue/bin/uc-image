@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.8
+SCRIPT_VERSION=4.11.9
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG

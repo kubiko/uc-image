@@ -35,6 +35,7 @@ apps:
 
 architectures:
     - build-on: arm64
+    - build-on: armhf
     - build-on: amd64
 
 parts:
@@ -115,28 +116,32 @@ parts:
   gcc:
     plugin: nil
     override-build: |
+      # gcc dependency is only for amba builds and supported on arm64 and amd64 only...
       # for native case, we need to rename things, to maintain same build scripts
+      release=""
       if [ "${SNAP_ARCH}" == "arm64" ]; then
         release="gcc-linaro-11.2.1-2021.10-aarch64_aarch64-unknown-linux-gnu"
-      else
+      elif [ "${SNAP_ARCH}" == "amd64" ]; then
         release="gcc-linaro-11.2.1-2021.10-x86_64_aarch64-linux-gnu"
       fi
-      url="https://people.canonical.com/~okubik/toolchains/${release}.tar.xz"
-      wget -c ${url} -O - | tar -xJ \
-            --strip-components=1 \
-            -C ${SNAPCRAFT_PART_INSTALL} \
-            --wildcards "*/aarch64*-linux-gnu/bin/as" \
-            --wildcards "*/aarch64*-linux-gnu/bin/ld" \
-            --wildcards "*/bin/aarch64*-linux-gnu-gcc" \
-            --wildcards "*/bin/*objcopy" \
-            --wildcards "*/bin/*strip" \
-            --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/cc1" \
-            --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/liblto_plugin.so*"
-      if [ "${SNAP_ARCH}" == "arm64" ]; then
-        mv ${SNAPCRAFT_PART_INSTALL}/aarch64-unknown-linux-gnu ${SNAPCRAFT_PART_INSTALL}/aarch64-linux-gnu
-        mv ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-unknown-linux-gnu-gcc ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-gcc
-        mv ${SNAPCRAFT_PART_INSTALL}/bin/objcopy ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-objcopy
-        mv ${SNAPCRAFT_PART_INSTALL}/bin/strip ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-strip
+      if [ -n "${release}" ]; then
+        url="https://people.canonical.com/~okubik/toolchains/${release}.tar.xz"
+        wget -c ${url} -O - | tar -xJ \
+              --strip-components=1 \
+              -C ${SNAPCRAFT_PART_INSTALL} \
+              --wildcards "*/aarch64*-linux-gnu/bin/as" \
+              --wildcards "*/aarch64*-linux-gnu/bin/ld" \
+              --wildcards "*/bin/aarch64*-linux-gnu-gcc" \
+              --wildcards "*/bin/*objcopy" \
+              --wildcards "*/bin/*strip" \
+              --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/cc1" \
+              --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/liblto_plugin.so*"
+        if [ "${SNAP_ARCH}" == "arm64" ]; then
+          mv ${SNAPCRAFT_PART_INSTALL}/aarch64-unknown-linux-gnu ${SNAPCRAFT_PART_INSTALL}/aarch64-linux-gnu
+          mv ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-unknown-linux-gnu-gcc ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-gcc
+          mv ${SNAPCRAFT_PART_INSTALL}/bin/objcopy ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-objcopy
+          mv ${SNAPCRAFT_PART_INSTALL}/bin/strip ${SNAPCRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-strip
+        fi
       fi
 
   android-mkfs-tools:
