@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.11
+SCRIPT_VERSION=4.11.12
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -902,11 +902,17 @@ if [ -n "${BUILDER_CONFIG["PRESEED"]}" ] && [ -n "${SNAP}" ]; then
   echo -e "\n\n# presseding enabled, image with this option cannot be built confined"
   echo -e "# run this command as"
   echo -e "# <your existing uc-image command with all the args> | xargs -I {} bash -c \"{}\"\n\n"
-  if [ -z "${SNAPD_EXT_KEYMGR}" ]; then
-    echo -e "sudo -E env PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\" $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
-  else
-    echo -e "sudo -E env PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\" SNAPD_EXT_KEYMGR=\"${SNAPD_EXT_KEYMGR}\" $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
+  sudo_env="PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\""
+
+  if [ -n "${SNAPD_EXT_KEYMGR}" ]; then
+    sudo_env="${sudo_env} SNAPD_EXT_KEYMGR=\"${SNAPD_EXT_KEYMGR}\""
   fi
+
+  if [ -n "${UBUNTU_STORE_AUTH_DATA_FILENAME}" ]; then
+    sudo_env="${sudo_env} UBUNTU_STORE_AUTH_DATA_FILENAME=\"${UBUNTU_STORE_AUTH_DATA_FILENAME}\""
+  fi
+
+  echo -e "sudo -E env ${sudo_env} $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
   exit
 fi
 
