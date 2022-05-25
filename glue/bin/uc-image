@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.12
+SCRIPT_VERSION=4.11.13
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -728,8 +728,10 @@ generate_manifest () {
     echo -e "$(date)" >> ${IMAGE_MANIFEST}
     echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
     echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
-    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
-      >> ${IMAGE_MANIFEST}
+    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml 1> /dev/null 2>&1; then
+      cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
+          >> ${IMAGE_MANIFEST}
+    fi
     echo -e "\n### Snap revissions ###" >> ${IMAGE_MANIFEST}
     grep -A7 "type: snap-revision" ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/assertions/snaps \
       >> ${IMAGE_MANIFEST}
