@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.16
+SCRIPT_VERSION=4.11.17
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -899,23 +899,28 @@ while [ "$1" != "" ]; do
     shift
 done
 
-# if we are trying to preseed, this cannot be realistically run in confinement
-if [ -n "${BUILDER_CONFIG["PRESEED"]}" ] && [ -n "${SNAP}" ]; then
-  echo -e "\n\n# presseding enabled, image with this option cannot be built confined"
-  echo -e "# run this command as"
-  echo -e "# <your existing uc-image command with all the args> | xargs -I {} bash -c \"{}\"\n\n"
-  sudo_env="PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\""
+# if we are trying to preseed, this cannot be realistically run in strict confinement
+if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
+  if [ -n "${SNAP}" ]; then
+    echo -e "\n\n# presseding enabled, image with this option cannot be built confined"
+    echo -e "# run this command as"
+    echo -e "# <your existing uc-image command with all the args> | xargs -I {} bash -c \"{}\"\n\n"
+    sudo_env="PATH=\"${PATH}\" LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH}\""
 
-  if [ -n "${SNAPD_EXT_KEYMGR}" ]; then
-    sudo_env="${sudo_env} SNAPD_EXT_KEYMGR=\"${SNAPD_EXT_KEYMGR}\""
+    if [ -n "${SNAPD_EXT_KEYMGR}" ]; then
+      sudo_env="${sudo_env} SNAPD_EXT_KEYMGR=\"${SNAPD_EXT_KEYMGR}\""
+    fi
+
+    if [ -n "${UBUNTU_STORE_AUTH_DATA_FILENAME}" ]; then
+      sudo_env="${sudo_env} UBUNTU_STORE_AUTH_DATA_FILENAME=\"${UBUNTU_STORE_AUTH_DATA_FILENAME}\""
+    fi
+
+    echo -e "sudo -E env ${sudo_env} $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
+    exit
+  else
+    # disable fakeroot
+    BUILDER_CONFIG["FAKEROOT"]=""
   fi
-
-  if [ -n "${UBUNTU_STORE_AUTH_DATA_FILENAME}" ]; then
-    sudo_env="${sudo_env} UBUNTU_STORE_AUTH_DATA_FILENAME=\"${UBUNTU_STORE_AUTH_DATA_FILENAME}\""
-  fi
-
-  echo -e "sudo -E env ${sudo_env} $(which uc-image) ${BUILDER_CONFIG["ARGS"]}"
-  exit
 fi
 
 parse_model_asseertion
