@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.13
+SCRIPT_VERSION=4.11.16
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -931,8 +931,10 @@ print_builder_config
 
 # run snap prepare image with all known parameters
 print_debug 1 "Running: snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
-if ! snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}; then
-  print_debug 0 "snap prepare-image failed, bailing out"
+snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}
+retVal=$?
+if [ $retVal -ne 0 ]; then
+  print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
   exit
 fi
 print_debug 2 "snap prepare-image completed"
