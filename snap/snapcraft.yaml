@@ -91,7 +91,15 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
+      if [ "${SNAPCRAFT_ARCH_TRIPLET}" = "arm-linux-gnueabihf" ]; then
+        url="https://launchpad.net/~ondrak/+snap/snapd-host-preseed/+build/1815881/+files/snapd_2.56.2+git521.gbff38e3_armhf.snap"
+      elif [ "${SNAPCRAFT_ARCH_TRIPLET}" = "aarch64-linux-gnu" ]; then
+        url="https://launchpad.net/~ondrak/+snap/snapd-host-preseed/+build/1815882/+files/snapd_2.56.2+git521.gbff38e3_arm64.snap"
+      elif [ "${SNAPCRAFT_ARCH_TRIPLET}" = "x86_64-linux-gnu" ]; then
+        url="https://launchpad.net/~ondrak/+snap/snapd-host-preseed/+build/1815942/+files/snapd_2.56.2+git521.gbff38e3_amd64.snap"
+      fi
+      wget -c ${url} -O snapd_preseed.snap
+      # SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
   yq:
