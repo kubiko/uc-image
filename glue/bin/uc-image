@@ -791,6 +791,10 @@ if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
   fi
 fi
 
+if [ -z ${BUILDER_CONFIG["MODEL_ASSERTION"]} ]; then
+  print_debug 0 "model_assertion is not set"
+  exit
+fi
 parse_model_asseertion
 [ -n "${UC_IMAGE_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
 
