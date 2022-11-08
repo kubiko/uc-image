@@ -91,15 +91,7 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      if [ "${SNAPCRAFT_ARCH_TRIPLET}" = "arm-linux-gnueabihf" ]; then
-        url="https://launchpad.net/~ondrak/+snap/snapd-preseed-enable-sysfs-overlay/+build/1907403/+files/snapd_2.57.4+git768.g9790488_armhf.snap"
-      elif [ "${SNAPCRAFT_ARCH_TRIPLET}" = "aarch64-linux-gnu" ]; then
-        url="https://launchpad.net/~ondrak/+snap/snapd-preseed-enable-sysfs-overlay/+build/1907404/+files/snapd_2.57.4+git768.g9790488_arm64.snap"
-      elif [ "${SNAPCRAFT_ARCH_TRIPLET}" = "x86_64-linux-gnu" ]; then
-        url="https://launchpad.net/~ondrak/+snap/snapd-preseed-enable-sysfs-overlay/+build/1907402/+files/snapd_2.57.4+git768.g9790488_amd64.snap"
-      fi
-      wget -c ${url} -O snapd_preseed.snap
-      # SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
+      SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
   yq:
