@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.11.18
+SCRIPT_VERSION=4.11.19
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -79,8 +79,8 @@ print_help () {
     echo "                           example: -c edge"
     echo "  --preseed                Pressed the image (UC20 only)."
     echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
-    echo "  --preseed-sysfs-overlay  Overlay of sysfs to be used when building presseded image."
-    echo "                           This required when building images with specific hw interfaces"
+    echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
+    echo "         (--sysfs-overlay) This required when building images with specific hw interfaces"
     echo "  -d, --debug              print debug"
     echo "  -dd                      print verbose debugs"
     echo "  -v|--version"
@@ -778,8 +778,8 @@ while [ "$1" != "" ]; do
             BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key ${2}"
             shift
             ;;
-        --preseed-sysfs-overlay)
-            BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--preseed-sysfs-overlay ${2}"
+        --preseed-sysfs-overlay | --sysfs-overlay)
+            BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay ${2}"
             shift
             ;;
         -O | --output-dir)
