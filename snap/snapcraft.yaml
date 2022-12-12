@@ -47,6 +47,7 @@ parts:
       - libuuid1
       - libblkid1
       - libcomerr2
+      - libubootenv-tool
       - libudev1
       - zlib1g
       - liblzma5
@@ -148,6 +149,16 @@ parts:
     plugin: nil
     stage-packages:
       - android-sdk-ext4-utils
+
+  lk-boot-env:
+    plugin: nil
+    override-pull: |
+      wget https://raw.githubusercontent.com/snapcore/snapd/master/include/lk/snappy_boot_common.h
+      wget https://raw.githubusercontent.com/snapcore/snapd/master/include/lk/snappy_boot_v2.h
+      wget https://raw.githubusercontent.com/kubiko/dragonboard-gadget/20-lk/snap-boot-sel/lk-boot-env.c
+    override-build: |
+      mkdir -p ${SNAPCRAFT_PART_INSTALL}/bin
+      gcc lk-boot-env.c -I/usr/include/ -Iapp/aboot -o ${SNAPCRAFT_PART_INSTALL}/bin/lk-boot-env
 
 build-packages:
   - wget
