@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.12.2
+SCRIPT_VERSION=4.13.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -33,8 +33,8 @@ fi
 
 # fill in default values
 BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
-BUILDER_CONFIG["BUILDER_DEBUG"]="${DB_BUILDER_DEBUG}"
-BUILDER_CONFIG["SEARCH_PATH"]="${DB_BUILDER_PATH}"
+BUILDER_CONFIG["DEBUG_LEVEL"]="${UC_IMAGE_DEBUG_LEVEL}"
+BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
 
 # special files to be copied from gadget snap if any exists
 # they are typically not mapped to any partition, so won't be picked based on
@@ -48,8 +48,8 @@ BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flash
 # delete all logs
 rm -rf $(dirname $(mktemp -u -t uc-image-builder-XXXX))/uc-image-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
-[ -z "${BUILDER_CONFIG["BUILDER_DEBUG"]}" ] && BUILDER_CONFIG["BUILDER_DEBUG"]=1
-[ -n "${DB_BUILDER_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${DB_BUILDER_WORK_DIR}
+[ -z "${BUILDER_CONFIG["DEBUG_LEVEL"]}" ] && BUILDER_CONFIG["DEBUG_LEVEL"]=1
+[ -n "${UC_IMAGE_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${UC_IMAGE_WORK_DIR}
 
 # boot assets candidate directories in gadget snap
 BOOT_ASSETS_CANDIDATES="blobs boot-assets assets"
@@ -133,15 +133,15 @@ print_help () {
     echo ""
     echo "Builder supports default settings passed through environment variables"
     echo "Supported env variables:"
-    echo "    DB_BUILDER_PATH:       Colon separated search paths to use to search for passed file parameters"
+    echo "    UC_IMAGE_SEARCH_PATH:  Colon separated search paths to use to search for passed file parameters"
     echo "                           if not provided with absolute or relative path."
     echo "                           First successful find is used."
     echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion, netplan-config"
-    echo "    DB_BUILDER_DEBUG:      Default log level"
+    echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
     echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
-    echo "    DB_BUILDER_WORK_DIR:   Default work directory to be used"
+    echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
     echo "                           If not defined or passed as param, tmp directory is created"
-    echo "    DB_BUILDER_OUTPUT_DIR: Default output directory"
+    echo "    UC_IMAGE_OUTPUT_DIR:   Default output directory"
     echo "                           If not defined or passed as param, 'uci-<model name>' directory will be created in current directory"
 }
 
@@ -250,7 +250,7 @@ check_snap_environment () {
 print_debug () {
   local level=${1}
   shift
-  [ "${BUILDER_CONFIG["BUILDER_DEBUG"]}" -ge "${level}" ] && echo -e "$@"
+  [ "${BUILDER_CONFIG["DEBUG_LEVEL"]}" -ge "${level}" ] && echo -e "$@"
   # if work dir does not exist yet, log to tmp log file
   if [ -e "${BUILDER_CONFIG["TMP_LOG_FILE"]}" ]; then
     echo -e "$@" >> ${BUILDER_CONFIG["TMP_LOG_FILE"]}
@@ -261,7 +261,7 @@ print_debug () {
 
 # print builder config if debug log
 print_builder_config () {
-  if [ "${BUILDER_CONFIG["BUILDER_DEBUG"]}" -ge "2" ]; then
+  if [ "${BUILDER_CONFIG["DEBUG_LEVEL"]}" -ge "2" ]; then
     print_debug 1 "Builder configuration:"
     for i in "${!BUILDER_CONFIG[@]}"; do
       print_debug 1 "\t$i = ${BUILDER_CONFIG[$i]}"
@@ -911,10 +911,10 @@ while [ "$1" != "" ]; do
             BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--password-auth"
             ;;
         -d | --debug)
-            BUILDER_CONFIG["BUILDER_DEBUG"]=3
+            BUILDER_CONFIG["DEBUG_LEVEL"]=3
             ;;
         -dd)
-            BUILDER_CONFIG["BUILDER_DEBUG"]=5
+            BUILDER_CONFIG["DEBUG_LEVEL"]=5
             ;;
         -v | --version)
             echo -e "version: ${SCRIPT_VERSION}"
@@ -960,7 +960,7 @@ if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
 fi
 
 parse_model_asseertion
-[ -n "${DB_BUILDER_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
+[ -n "${UC_IMAGE_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
 
 # check we have all the permissions
 check_snap_environment
