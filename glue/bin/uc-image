@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.12.1
+SCRIPT_VERSION=4.12.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -448,13 +448,15 @@ update_snapd_recovery_mode () {
   if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ]; then
     print_debug 1 "\n !! updating snapd recovery mode to: ${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
     # depending on bootloader we need to use appropriate tools
-    if [ ! "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
+    if [ "${BUILDER_CONFIG["BOOTLOADER"]}" == "u-boot" ]; then
       # prepare config file point to target
       local fw_config="/tmp/fw_env-seed.config"
       echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
       echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
+      print_debug 4 "u-boot bootloader: ${SNAP}/usr/bin/fw_setenv --config \"${fw_config}\" \"snapd_recovery_mode\" \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
       ${SNAP}/usr/bin/fw_setenv --config "${fw_config}" "snapd_recovery_mode" "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
-    elif [ ! "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
+    elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" == "lk" ]; then
+      print_debug 4 "lk bootloader: ${SNAP}/bin/lk-boot-env -u ${BUILDER_CONFIG["WORK_DIR"]}/lk/snaprecoverysel.bin --revovery-mode \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
       ${SNAP}/bin/lk-boot-env -u ${BUILDER_CONFIG["WORK_DIR"]}/lk/snaprecoverysel.bin --revovery-mode "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
     else
       print_debug 1 "\n !! Unsupported bootloader to set snapd_recovery_mode"
