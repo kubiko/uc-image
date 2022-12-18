@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the the GNU General Public License version 3, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranties of
+# MERCHANTABILITY, SATISFACTORY QUALITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the applicable version of the GNU General Public
+# License for more details.
+#.
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright (C) 2022 Canonical, Ltd.
+
+GCC="aarch64-linux-gnu-gcc"
+
+# gadget amboot root
+AMBOOT=${1}
+IMAGE_DIR=${2}
+OUTPUR_DIR=${3}
+BOARD="${AMBOOT}/board"
+HOST_IMAGE="${AMBOOT}/mkimage_${SNAP_ARCH}"
+ARCH=$(grep CONFIG_ARCH ${BOARD}/config.h | awk '{print $2}'| cut -c 13-)
+BSP=$(grep CONFIG_BSP ${BOARD}/config.h | awk '{print $2}'| cut -c 18-)
+CPU=$(grep CONFIG_CPU ${BOARD}/config.h | awk '{print $2}'| cut -c 12-)
+SECURE_BOOT=$(grep "^#define CONFIG_TRUSTZONE_SECURE_BOOT" ${BOARD}/config.h | awk '{print $3}')
+echo "Building for: ARCH=${ARCH} , BSP=${BSP} , CPU=${CPU}, SECURE_BOOT=${SECURE_BOOT} BUILD_TYPE=${BUILD_TYPE}"
+
+PROFILE="${AMBOOT}/profile.ubuntu-core"
+OBJ_DIR="${AMBOOT}/.memfwobjs"
+WORK_DIR=${PWD}
+
+# set default flags
+# asm piggy flags
+ASM_FLAGS="-march=armv8-a+crc+crypto -mgeneral-regs-only -fomit-frame-pointer -fno-common \
+-nostdinc -D__ASM__ -D__ARCH_${ARCH}__ -D__BSP_${BSP}__ -D__${CPU}__ -D__RELEASE_BUILD__ -D__BUILD_FIRMWARE__"
+# fw gss flags
+FW_FLAGS="-nostartfiles -march=armv8-a+crc+crypto -mgeneral-regs-only -nostdlib -Wl,--build-id=none"
+
+if [ ! -e ${AMBOOT}/.uc-image-flexible-config ]; then
+  echo -e "Missing Ubuntu Core image configuration (.uc-image-flexible-config)"
+  echo -e "Check and ensure gadget snap contains this configuration"
+  exit 0
+else
+  source ${AMBOOT}/.uc-image-flexible-config
+fi
+
+DDATE=$(date +"-D__YEAR__=%Y -D__MONTH__=%-m -D__DAY__=%-d")
+
+mkdir -p ${WORK_DIR}/memfwprog
+rm -rf ${WORK_DIR}/memfwprog/*.img
+echo "building target dependencies for all the partitions..."
+for i in {0..15}
+  do 
+    name=$(grep "IMAGE_${i}_NAME" ${PROFILE} | awk -F ':= ' '{print $2}')
+    if [ -z "${name}" ]; then
+      break
+    fi
+    flags=$(grep "IMAGE_${i}_FLAG" ${PROFILE} | awk -F ':= ' '{print $2}')
+    file=$(grep "IMAGE_${i}_FILE" ${PROFILE} | awk -F ':= ' '{print $2}')
+    # special case bst, atf and bld files
+    case ${name} in
+      bst) file="bst_release.bin.signed";;
+      bld) file="fip.bin";;
+      atf) file="atf.bin.signed";;
+      *) file=$(basename ${file})
+    esac
+    # handle non existent of empty files
+    if [ "${file}" == "empty" ]; then
+      continue
+    # locate part image
+    elif [ -e ${IMAGE_DIR}/${file} ]; then
+      image_path=${IMAGE_DIR}/${file}
+    else
+      image_path="${PWD}/${file}"
+      touch > ${image_path}
+    fi
+    # create image with header (load and jump addresses are not used)
+    ${HOST_IMAGE} -n ${name} -l 0xffffffffffffffff -j 0xffffffffffffffff -f "${flags}" -i ${image_path} memfwprog/${name}.img
+    # build piggy image
+    ${GCC} \
+      ${ASM_FLAGS} \
+      -I${AMBOOT}/include \
+      -I${BOARD} \
+      -I${BOARD}/bsp \
+      -c ${AMBOOT}/piggy_image.S \
+      -o ${WORK_DIR}/memfwprog/${name}_piggy.img -DIMAGE=${WORK_DIR}/memfwprog/${name}.img
+done
+
+echo "build requested targets..."
+for t in "${!FW_TARGETS[@]}"
+do
+  echo -e "building target ${t} to ${FW_TARGETS[${t}]}"
+  IFS='_'
+  piggys=""
+  for p in ${t}
+  do
+    piggys="${piggys} memfwprog/${p}_piggy.img"
+  done
+  unset IFS
+  ${GCC} \
+    -Wl,-T,${AMBOOT}/memfwprog/firmware.lds \
+    ${FW_FLAGS} \
+    -L${WORK_DIR}/memfwprog \
+    -o ${OUTPUR_DIR}/${FW_TARGETS[${t}]} \
+    ${piggys} ${MEMFWPROG_OBJS}
+done

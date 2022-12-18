@@ -16,7 +16,7 @@
 # Copyright (C) 2020 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.13.1
+SCRIPT_VERSION=4.14.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -730,10 +730,22 @@ run_amba_image_build () {
   # run amba image builder script, we need to run it in dir
   # as it has some hardcoded paths
   pushd ${BUILDER_CONFIG["WORK_DIR"]}/amba-build
-  build-amba-images \
-     ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
-     ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
-     ${BUILDER_CONFIG["OUTPUT_DIR"]}
+  # we have two types of amba firmware, legacy and flexible
+  # determine which one we are building based on
+  if [ -e .uc-image-config ]; then
+    build-amba-images \
+      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
+      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
+      ${BUILDER_CONFIG["OUTPUT_DIR"]}
+  elif [ -e .uc-image-flexible-config ]; then
+    build-amba-images-flexible \
+      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
+      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
+      ${BUILDER_CONFIG["OUTPUT_DIR"]}
+  else
+    print_debug 1 "\nMissing amba uc-image config!!"
+    exit 1
+  fi
   popd
 }
 
