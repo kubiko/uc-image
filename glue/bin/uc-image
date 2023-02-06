@@ -13,10 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Copyright (C) 2020 Canonical, Ltd.
+# Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=4.14.1
+SCRIPT_VERSION=5.0.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -77,7 +77,7 @@ print_help () {
     echo "                           The snap channel to use, one of stable/candidate/beta/edge"
     echo "                           stable channel is assumed if no channel is defined"
     echo "                           example: -c edge"
-    echo "  --preseed                Pressed the image (UC20 only)."
+    echo "  --preseed                Pressed the image."
     echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
     echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
     echo "         (--sysfs-overlay) This required when building images with specific hw interfaces"
@@ -87,7 +87,6 @@ print_help () {
     echo "                           print version of the script"
     echo ""
     echo "Common options:"
-    echo "!!! Not all options are available when building Ubuntu Core 20 image!!!"
     echo "  --disk-info DISK-INFO-CONTENTS"
     echo "                           File to be used as .disk/info on the image's rootfs."
     echo "                           This file can contain useful information about the"
@@ -123,27 +122,13 @@ print_help () {
     echo "                           This option provides ability to build device specific image."
     echo "                           Created image is only usable on the device from which \"device\" directory"
     echo "                           was exported."
-    echo "Following options are only available to Ubuntu Core 16 and 18 images"
-    echo "  --netplan-config NETPLAN-CONFIG-FILE"
-    echo "                           Network config for netplan, should not be combined with --network-config"
-    echo " --backdoor U              Create backdoor (only uc-16/18 images) with user U, supports additional parameters"
-    echo "     --import-id U         backdoor: use 'ssh-import-id' to get ssh public keys"
-    echo "                           may be used more than once."
-    echo "     --password P          backdoor: password, implies --password-auth"
-    echo "     --password-auth        backdoor: enable password auth"
-    echo "     --pubkeys F           backdoor: add public keys from file F"
-    echo "                                  default: ~/.ssh/id_rsa.pub unless --password"
-    echo "                                  or --import-id specified"
-    echo " --set-hostname HOSTNAME"
-    echo "                           Set initial hostname to be used at first boot"
-    echo "                           !!! This feature is not guarteed as it's using image overlay"
     echo ""
     echo "Builder supports default settings passed through environment variables"
     echo "Supported env variables:"
     echo "    UC_IMAGE_SEARCH_PATH:  Colon separated search paths to use to search for passed file parameters"
     echo "                           if not provided with absolute or relative path."
     echo "                           First successful find is used."
-    echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion, netplan-config"
+    echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion"
     echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
     echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
     echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
@@ -306,6 +291,10 @@ parse_model_asseertion() {
   # we can have true uc20 and we can have uc20 with disk and boot as uc16/18
   # grade keyword is only defined for tru uc20
   BUILDER_CONFIG["UC_VERSION"]="$(sed -n 's/^base: core\(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
+  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
+    print_debug 1 "\nUbuntu Core 16/18 image builds are no more supported by this tool."
+    exit
+  fi
   print_debug 2 "Determined Ubuntu Core version: ${BUILDER_CONFIG["UC_VERSION"]}"
   BUILDER_CONFIG["MODEL"]="$(sed -n 's/^model: \(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
   print_debug 2 "Determined model name: ${BUILDER_CONFIG["MODEL"]}"
@@ -326,22 +315,13 @@ determine_bootloader () {
   print_debug 5 "bootloader: yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
   BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
   print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
-  # UC20 behaves differently from UC16/18
-  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
-    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
-  else
-    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/image
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
-  fi
+  BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
 
   print_debug 3 "BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["IMAGE_ROOT"]}"
   # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
-    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-      mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/uboot ${BUILDER_CONFIG["WORK_DIR"]}/system-boot
-    fi
     # check if we have defined dtb
     BUILDER_CONFIG["DTB"]=$(yq eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
@@ -359,11 +339,6 @@ determine_bootloader () {
     exit 0
   fi
 
-  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/* ${BUILDER_CONFIG["WORK_DIR"]}/root/system-data/
-    # set new image root
-    BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/root
-  fi
   print_debug 1 "\nDetected bootloader: ${BUILDER_CONFIG["BOOTLOADER"]}"
 }
 
@@ -422,17 +397,6 @@ normalise_size_to_kb () {
   echo ${size}
 }
 
-# seed netplan network config if provided
-# if no netplan config is passed do nothing
-seed_netplan_config () {
-  print_debug 5 "seed_netplan_config(${BUILDER_CONFIG["NETPLAN_CONF"]})"
-  if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ]; then
-    print_debug 1 "\nUsing passed netplan configuration: [${BUILDER_CONFIG["NETPLAN_CONF"]}]"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/netplan
-    cp ${BUILDER_CONFIG["NETPLAN_CONF"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/netplan/00-snapd-config.yaml
-  fi
-}
-
 # seed passed assertion as auto import assertion
 # one assertion can be passed
 # if no assertion is passed do nothing
@@ -440,13 +404,8 @@ seed_auto_import_assertion () {
   print_debug 5 "seed_auto_import_assertion(${BUILDER_CONFIG["ASSERTION_IMPORT"]})"
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
-    # based on the UC version, determine location
-    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-      cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/auto-import.assert
-    else
-      local system=$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*)
-      cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${system}/auto-import.assert
-    fi
+    local system=$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*)
+    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${system}/auto-import.assert
   fi
 }
 
@@ -483,36 +442,8 @@ disk_info_contents () {
   print_debug 5 "disk_info_contents(${BUILDER_CONFIG["DISK_INFO_CONTENTS"]})"
   if [ -n "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" ]; then
     print_debug 1 "\nUsing passed disk info contents: [${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}]"
-    if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
-      mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk
-      cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info
-    else
-      mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
-      cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc
-    fi
-  fi
-}
-
-# check if we should set default hostname
-# if no hostname is passed do nothing
-seed_hostname () {
-  print_debug 5 "seed_hostname(${BUILDER_CONFIG["HOSTNAME"]})"
-  if [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ]; then
-    print_debug 1 "\nSetting initial hostname to [ ${BUILDER_CONFIG["HOSTNAME"]} ]"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/
-    echo ${BUILDER_CONFIG["HOSTNAME"]} > ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/etc/hostname
-  fi
-}
-
-# create backdoor into the image if defined
-create_backdoor() {
-  print_debug 5 "create_backdoor(${BUILDER_CONFIG["BACKDOOR_USER"]}, ${BUILDER_CONFIG["BACKDOOR_PARAMS"]})"
-  if [ -n "${BUILDER_CONFIG["BACKDOOR_USER"]}" ];then
-    print_debug 1 "Creating backdoor for user ${BUILDER_CONFIG["BACKDOOR_USER"]}"
-    backdoor-image \
-      --user ${BUILDER_CONFIG["BACKDOOR_USER"]} \
-      ${BUILDER_CONFIG["BACKDOOR_PARAMS"]} \
-      ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data
+    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk
+    cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info
   fi
 }
 
@@ -575,84 +506,9 @@ create_disk_image() {
 
 }
 
-# create system-boot partition if needed
-create_system_boot_partition_image () {
-  # u-boot bootloader is using dedicated 'system-boot' partition
-  if [ ! "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
-    return
-  fi
-  # check if we need to copy any assets from gadget first
-  local source="$(yq eval '.volumes.[].structure.[] | select(.role == "system-boot") | .content.[].source' ${BUILDER_CONFIG["GADGET_YAML"]})"
-  if [ -n "${source}" ]; then
-    local target="$(yq eval '.volumes.[].structure.[] | select(.role == "system-boot") | .content.[].target' ${BUILDER_CONFIG["GADGET_YAML"]})"
-    if [ -n "${target}" ]; then
-      cp -r ${BUILDER_CONFIG["GADGET_DIR"]}/${source} \
-            ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/${target}
-    fi
-  fi
-  # calculate system-boot part size
-  local system_boot_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "system-boot") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
-  local SYSTEM_BOOT="$(normalise_size_to_kb ${system_boot_size_human})"
-
-  print_debug 1 "\nCreating image for system-boot"
-  print_debug 2 "dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=${SYSTEM_BOOT}"
-  dd if=/dev/zero of=${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img bs=1024 count=${SYSTEM_BOOT}
-  ${BUILDER_CONFIG["FAKEROOT"]} mkfs.vfat \
-      -s 1 \
-      -S 512 \
-      -F 32 \
-      -n 'system-boot' \
-      ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  mcopy \
-      -s \
-      -i ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.img \
-      ${BUILDER_CONFIG["WORK_DIR"]}/system-boot/* :: 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-}
-
 # create seed partition image
-create_seed_partition_image () {
-  print_debug 1 "\nCreating seed partition image"
-  # copy back up files in root/boot
-
-  local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
-  local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
-
-  create_disk_image \
-      ${BUILDER_CONFIG["IMAGE_ROOT"]} \
-      ${BUILDER_CONFIG["WORK_DIR"]}/seed \
-      "seed" \
-      ${SEED_SIZE}
-}
-
-# create writable partition image
-create_writable_partition_image () {
-  # root partition is "writable"
-  print_debug 1 "\nCreating image for writable"
-  print_debug 2 "Calculating required size of writable partition image"
-  # first check writable part size from gadget.yaml
-  local writable_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "writable") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
-  if [ -z "${writable_size_human}" ]; then
-    # make root size bigger by what be needed for boot backup
-    # local root_size=$(find ${BUILDER_CONFIG["IMAGE_ROOT"]} -exec du -s {} + | awk '{total = total + $1}END{printf("%.0fMB",(total / 1024 + 50))}')
-    print_debug 3 "IMAGE_ROOT=${BUILDER_CONFIG["IMAGE_ROOT"]}"
-    du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]}
-    local root_size=$(du -sh ${BUILDER_CONFIG["IMAGE_ROOT"]} | awk '{print $1}')
-    # add 20M buffer
-    local ROOT_SIZE=$(echo ${root_size} | awk '{printf("%.0f",($1+20))}')M
-  else
-    local ROOT_SIZE="$(normalise_size_to_kb ${writable_size_human})k"
-  fi
-  print_debug 2 "ROOT_SIZE=${ROOT_SIZE}"
-  create_disk_image \
-      ${BUILDER_CONFIG["IMAGE_ROOT"]} \
-      ${BUILDER_CONFIG["WORK_DIR"]}/writable \
-      "writable" \
-      ${ROOT_SIZE}
-}
-
-# create UC20 seed partition image
-create_uc20_seed_partition_image () {
-  print_debug 1 "\nCreating UC20 seed partition image"
+create_ubuntu_seed_partition_image () {
+  print_debug 1 "\nCreating ubuntu-seed partition image"
 
   # calculate ubuntu-seed part size
   local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
@@ -690,6 +546,7 @@ copy_release_files () {
   if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ] && [ -z "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]; then
     mv ${BUILDER_CONFIG["IMAGE_ROOT"]} \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed
+    BUILDER_CONFIG["IMAGE_ROOT"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
   fi
   # copy gadget boot assets files if making normal release
   for f in $(yq eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
@@ -708,11 +565,6 @@ copy_release_files () {
         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
     fi
   done
-  # handle uc-16/18 u-boot case
-  if compgen -G ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.* > /dev/null; then
-    mv ${BUILDER_CONFIG["WORK_DIR"]}/system-boot.* \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}
-  fi
   # if booloader is lk, copy over boot image
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
@@ -775,41 +627,27 @@ run_amba_image_build () {
 # generate image manifest
 generate_manifest () {
   local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
-  if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-    if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model ]; then
-        sed '1,/timestamp/!d' ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/assertions/model > ${IMAGE_MANIFEST}
-    fi
-    if [ -e ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml ]; then
-        sed -e '/snap-id:/d' \
-            -e '/contact:/d' \
-            -e 's/snaps:/seeded snaps:/g' \
-            -e 's/file:.*_\(.*\).snap/revision: \1/' \
-            ${BUILDER_CONFIG["IMAGE_ROOT"]}/system-data/var/lib/snapd/seed/seed.yaml \
-          >> ${IMAGE_MANIFEST}
-    fi
-  else
-    echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
-    echo -e "$(date)" >> ${IMAGE_MANIFEST}
-    echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
-    echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
-    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml 1> /dev/null 2>&1; then
-      cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
-          >> ${IMAGE_MANIFEST}
-    fi
-    echo -e "\n### Snap revissions ###" >> ${IMAGE_MANIFEST}
-    grep -A7 "type: snap-revision" ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/assertions/snaps \
-      >> ${IMAGE_MANIFEST}
-    echo -e "\n### Model assertion ###" >> ${IMAGE_MANIFEST}
-    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/model >> ${IMAGE_MANIFEST}
-    echo -e "\n### snap checksums ###" >> ${IMAGE_MANIFEST}
-    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
-      sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
-        | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
-    fi
-    if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap 1> /dev/null 2>&1; then
-      sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
-        | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
-    fi
+  echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
+  echo -e "$(date)" >> ${IMAGE_MANIFEST}
+  echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
+  echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
+  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml 1> /dev/null 2>&1; then
+    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
+        >> ${IMAGE_MANIFEST}
+  fi
+  echo -e "\n### Snap revissions ###" >> ${IMAGE_MANIFEST}
+  grep -A7 "type: snap-revision" ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/assertions/snaps \
+    >> ${IMAGE_MANIFEST}
+  echo -e "\n### Model assertion ###" >> ${IMAGE_MANIFEST}
+  cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/model >> ${IMAGE_MANIFEST}
+  echo -e "\n### snap checksums ###" >> ${IMAGE_MANIFEST}
+  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+  fi
+  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
   fi
 }
 
@@ -856,16 +694,6 @@ while [ "$1" != "" ]; do
             BUILDER_CONFIG["WORK_DIR"]="$(${READLINK} -f ${2})"
             shift
             ;;
-        --netplan-config)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                BUILDER_CONFIG["NETPLAN_CONF"]="${f}"
-            else
-                print_debug 0 "wrong netplan config file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
         --auto-import-assertion)
             f=$(validate_file ${2})
             if [ -n "${f}" ] && [ -f ${f} ]; then
@@ -910,49 +738,6 @@ while [ "$1" != "" ]; do
         --build-seed-image)
             BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
             ;;
-        --set-hostname)
-            if [ -n "${2}" ]; then
-               BUILDER_CONFIG["HOSTNAME"]="${2}"
-            else
-               print_debug 0 "Missing hostname parameter"
-            fi
-            shift
-            ;;
-        --backdoor)
-            if [ -n "${2}" ]; then
-                BUILDER_CONFIG["BACKDOOR_USER"]="${2}"
-            else
-                print_debug 0 "Missing backdoor user parameter"
-            fi
-            shift
-            ;;
-        --import-id)
-            if [ -n "${2}" ]; then
-                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--import-id ${2}"
-            else
-                print_debug 0 "Missing import-id parameter"
-            fi
-            shift
-            ;;
-        --password)
-            if [ -n "${2}" ]; then
-                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--password ${2}"
-            else
-                print_debug 0 "Missing password parameter"
-            fi
-            shift
-            ;;
-        --pubkeys)
-            if [ -n "${2}" ]; then
-                BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--pubkeys ${2}"
-            else
-                print_debug 0 "Missing pubkeys parameter"
-            fi
-            shift
-            ;;
-        --password-auth)
-            BUILDER_CONFIG["BACKDOOR_PARAMS"]="${BUILDER_CONFIG["BACKDOOR_PARAMS"]:+${BUILDER_CONFIG["BACKDOOR_PARAMS"]} }--password-auth"
-            ;;
         -d | --debug)
             BUILDER_CONFIG["DEBUG_LEVEL"]=3
             ;;
@@ -978,7 +763,7 @@ while [ "$1" != "" ]; do
     shift
 done
 
-if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" && -z "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ];
+if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ] && [ -z "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ]; then
   echo -e "\nMissing \"--set-to-factory-reset\" while using \"--ubuntu-seed-device-dir\""
   exit
 fi
@@ -1045,20 +830,6 @@ seed_auto_import_assertion
 # mark image as recovery if required
 update_snapd_recovery_mode
 
-# for UC20 there are no additional image modifications supported yet
-if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
-    # seed netplan network config if provided
-    seed_netplan_config
-    seed_hostname
-    # Create backdoor if defined
-    create_backdoor
-else
-    if [ -n "${BUILDER_CONFIG["NETPLAN_CONF"]}" ] \
-       || [ -n "${BUILDER_CONFIG["HOSTNAME"]}" ]; then
-         echo "!!! Ignoring any passed overlays, not yet supported for UC20 !!!!!"
-    fi
-fi
-
 # prepare output directory
 if [ -d ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
     print_debug 2 "Cleaning output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}]"
@@ -1066,23 +837,9 @@ if [ -d ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
 fi
 mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
 
-# UC16/18 can have custom or normal part schema
-if [ "${BUILDER_CONFIG["UC_VERSION"]}" -ge "20" ]; then
-  # create ubuntu-seed image
-  create_uc20_seed_partition_image
-else
-  # create system boot if needed
-  create_system_boot_partition_image
+# create ubuntu-seed image
+create_ubuntu_seed_partition_image
 
-  # check if gadget has partition 'seed', for factory reset
-  if [ -n "$(yq eval '.volumes.[].structure.[] | select(.name == "seed") | .name' ${BUILDER_CONFIG["GADGET_YAML"]})" ]; then
-    # creating seed partition image
-    create_seed_partition_image
-  else
-    # create write partition image
-    create_writable_partition_image
-  fi
-fi
 # copy release files to output directory or run amba image build
 # if we are building system-seed image, do not run amba_image_build
 if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ] && \
