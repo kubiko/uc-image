@@ -110,12 +110,19 @@ print_help () {
     echo "                           Auto import assertion file to be included in root of main writable partiton."
     echo "                           This assertion is imported once system is fully seeded"
     echo "                           Passed file does not need to have correct file name, it will be renamed"
-    echo " --set-to-recovery-mode    !!Experimental!!"
-    echo "                           Build recovery image. This image will atempt to run system recovery from"
-    echo "                           newly created seed, preserving ubuntu-save content."
+    echo " --set-to-factory-reset    !!Experimental!!"
+    echo "                           This option will set snapd_recovery_mode to \"factory-reset\""
+    echo "                           System should perform factory-reset while, preserving ubuntu-save content."
     echo "                           This is experimental feature and it's not guranteed to work, especially"
     echo "                           disk layout had changed"
-    echo ""
+    echo "                           If \"ubuntu-seed-device-dir\" is not provide, ubuntu-seed partition won't be created."
+    echo "                           Instead ubuntu-seed directory will be copied to the output directory."
+    echo "--ubuntu-seed-device-dir   !!Experimental!!"
+    echo "                           Requires set-to-factory-reset to be set!"
+    echo "                           ubuntu-seed device directory to be included in the built seed image"
+    echo "                           This option provides ability to build device specific image."
+    echo "                           Created image is only usable on the device from which \"device\" directory"
+    echo "                           was exported."
     echo "Following options are only available to Ubuntu Core 16 and 18 images"
     echo "  --netplan-config NETPLAN-CONFIG-FILE"
     echo "                           Network config for netplan, should not be combined with --network-config"
@@ -463,6 +470,11 @@ update_snapd_recovery_mode () {
       exit 1
     fi
   fi
+  if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]; then
+    print_debug 1 "\n\tSeeding device encryption context to the image"
+    print_debug 1 "\n\t!! This image will only work on the device from which encryption context was fetched !!"
+    cp -r "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" "${BUILDER_CONFIG["IMAGE_ROOT"]}/device"
+  fi
 }
 
 # add build timestamp if provided
@@ -646,6 +658,12 @@ create_uc20_seed_partition_image () {
   local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
 
+  # do not create ubuntu-seed image if we are building factory-reset image
+  # and encryption context was not provided
+  if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ] && [ -z "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]; then
+    return
+  fi
+
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed \
@@ -668,6 +686,11 @@ copy_release_files () {
     fi
   done
 
+  # if building factory-reset image without encryption context, use ubuntu-seed dir
+  if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ] && [ -z "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]; then
+    mv ${BUILDER_CONFIG["IMAGE_ROOT"]} \
+       ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed
+  fi
   # copy gadget boot assets files if making normal release
   for f in $(yq eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
   do
@@ -863,8 +886,16 @@ while [ "$1" != "" ]; do
             fi
             shift
             ;;
-        --set-to-recovery-mode)
-            BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]="recover"
+        --set-to-factory-reset)
+            BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]="factory-reset"
+            ;;
+        --ubuntu-seed-device-dir)
+            if [ -n "${2}" ]; then
+                BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]="${2}"
+            else
+               print_debug 0 "Missing ubuntu-seed-device-dir parameter"
+            fi
+            shift
             ;;
         --help | -h)
             print_help
@@ -947,6 +978,10 @@ while [ "$1" != "" ]; do
     shift
 done
 
+if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" && -z "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ];
+  echo -e "\nMissing \"--set-to-factory-reset\" while using \"--ubuntu-seed-device-dir\""
+  exit
+fi
 # if we are trying to preseed, this cannot be realistically run in strict confinement
 if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
   if [ -n "${SNAP}" ]; then
