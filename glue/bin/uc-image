@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.0.1
+SCRIPT_VERSION=5.2.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -104,7 +104,6 @@ print_help () {
     echo " --build-raw               Build raw image, instead of sparse one"
     echo "                           Cannot be used in combination with --use-android-fs-tools!!!"
     echo " --use-android-fs-tools    Use android make_ext4fs instead of mkfs.ext4"
-    echo " --build-seed-image        Build compressed ubuntu-seed fs image release"
     echo " --auto-import-assertion   ASSERTION FILE"
     echo "                           Auto import assertion file to be included in root of main writable partiton."
     echo "                           This assertion is imported once system is fully seeded"
@@ -122,6 +121,16 @@ print_help () {
     echo "                           This option provides ability to build device specific image."
     echo "                           Created image is only usable on the device from which \"device\" directory"
     echo "                           was exported."
+    echo ""
+    echo "--build-tar-seed           Build seed image as tar ball(no compression needed)"
+    echo "                           Use this option to update existing devices with ssh access"
+    echo "                           This can be used with 'set-to-factory-reset' without need to provide"
+    echo "                           'ubuntu-seed-device-dir' with sealed encryption keys'"
+    echo ""
+    echo "--build-compresed-seed     Build compressed ubuntu-seed fs image."
+    echo "                           Use this to option to build compressed, unsparsed ubuntu-seed partition image."
+    echo "                           Such a image can be sed for flash device from running system with xzcat, e.g"
+    echo "                             $ xzcat <ubuntu-seed.img.xz> | pv | sudo dd of=<target part> bs=256M;sync"
     echo ""
     echo "Builder supports default settings passed through environment variables"
     echo "Supported env variables:"
@@ -469,6 +478,12 @@ create_disk_image() {
        -s \
        ${volume_image}.img \
        ${volume_source} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+  elif [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
+    print_debug 1 "\nCreating tarball for ${volume_label}"
+    print_debug 2 "tar -cf ${volume_image}.tar ${volume_source}"
+    ${BUILDER_CONFIG["FAKEROOT"]} tar -cf ${volume_image}.tar ${volume_source}
+    # update target file name
+    target_image="${volume_image}.tar"
   else
     print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
     ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
@@ -485,7 +500,7 @@ create_disk_image() {
       exit 0
     fi
     # post-process image if required
-    if [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" = "true" ]; then
+    if [ "${BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]}" = "true" ]; then
       print_debug 1 "\nCompressing image for ${volume_label}"
       print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
       xz -c ${volume_image}.raw  > ${volume_image}.img.xz
@@ -534,10 +549,13 @@ copy_release_files () {
     if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img ]; then
       mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img \
          ${BUILDER_CONFIG["OUTPUT_DIR"]}/
-    fi
-    # check also for imx.xz
-    if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz ]; then
+    # check for .imx.xz
+    elif [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz ]; then
       mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz \
+         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    # check also for .tar
+    elif  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar ]; then
+      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar \
          ${BUILDER_CONFIG["OUTPUT_DIR"]}/
     fi
   done
@@ -735,8 +753,11 @@ while [ "$1" != "" ]; do
         --use-android-fs-tools)
             BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
             ;;
-        --build-seed-image)
-            BUILDER_CONFIG["BUILD_SEED_IMAGE"]="true"
+        --build-compresed-seed)
+            BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
+            ;;
+        --build-tar-seed)
+            BUILDER_CONFIG["BUILD_TAR_SEED"]="true"
             ;;
         -d | --debug)
             BUILDER_CONFIG["DEBUG_LEVEL"]=3
@@ -846,8 +867,11 @@ create_ubuntu_seed_partition_image
 
 # copy release files to output directory or run amba image build
 # if we are building system-seed image, do not run amba_image_build
+# do not build amba image if building factory-reset image without encryption context
 if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ] && \
-   [ "${BUILDER_CONFIG["BUILD_SEED_IMAGE"]}" != "true" ]; then
+   [ "${BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]}" != "true" ] && \
+   [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" != "true" ] && \
+   [[ "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" != "true" || -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]]; then
   run_amba_image_build
 else
   copy_release_files
