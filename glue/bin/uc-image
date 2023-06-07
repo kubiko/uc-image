@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.3.1
+SCRIPT_VERSION=5.3.3
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -669,6 +669,14 @@ generate_manifest () {
   fi
 }
 
+run_snap_prepare_image() {
+  # set default exit code as fail before running snap prepare-image
+  echo 2 > ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result
+  eval "$@"
+  retValue=$?
+  echo ${retValue} > ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result
+}
+
 # make sure system is ready before we even start parsing input
 provision_macOS_system
 
@@ -837,14 +845,15 @@ prepare_work_directory
 print_builder_config
 
 # run snap prepare image with all known parameters
-print_debug 1 "Running: snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
-snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}
-retVal=$?
+image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+print_debug 1 "Running: ${image_build_command}"
+run_snap_prepare_image ${image_build_command} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}
+retVal=$(cat ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result)
 if [ $retVal -ne 0 ]; then
   print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
   exit
 fi
-print_debug 2 "snap prepare-image completed"
+print_debug 2 "snap prepare-image completed with exit code (${retVal})"
 
 BUILDER_CONFIG["GADGET_DIR"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget"
 BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
