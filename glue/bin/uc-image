@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.3.3
+SCRIPT_VERSION=5.3.4
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -43,7 +43,7 @@ BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
 # gpt_* : partition table files
 # Qualcomm flash supporting files flashall, rawprogram*, patch*, prog_fire*
 # dragonboard 410c: sbc_1.0_8016.bin
-BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed.* imx-boot.* bst_release.bin.signed"
+BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed.* imx-boot.* bst_release.bin.signed reflash-system.sh"
 
 # delete all logs
 rm -rf $(dirname $(mktemp -u -t uc-image-builder-XXXX))/uc-image-builder-* 2> /dev/null
