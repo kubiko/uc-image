@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.3.4
+SCRIPT_VERSION=5.3.6
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -489,6 +489,9 @@ create_disk_image() {
     ${BUILDER_CONFIG["FAKEROOT"]} tar -cf ${volume_image}.tar ${volume_source}
     # update target file name
     target_image="${volume_image}.tar"
+  elif [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; then
+    print_debug 1 "\nSkipping file system image step for ${volume_label}, as it's not required by the build type."
+    target_image="${volume_source}"
   else
     print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
     ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
@@ -511,6 +514,9 @@ create_disk_image() {
       xz -c ${volume_image}.raw  > ${volume_image}.img.xz
       # update target file name
       target_image="${volume_image}.img.xz"
+    elif [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
+      print_debug 1 "\nSkipping sparse image step for ${volume_label}, as it's not required by the build type."
+      target_image="${volume_image}.raw"
     else
       print_debug 1 "\nCreate sparse image for ${volume_label}"
       print_debug 2 "img2simg ${volume_image}.raw ${volume_image}.img"
