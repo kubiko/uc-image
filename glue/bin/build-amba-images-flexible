@@ -22,7 +22,15 @@ AMBOOT=${1}
 IMAGE_DIR=${2}
 OUTPUR_DIR=${3}
 BOARD="${AMBOOT}/board"
-HOST_IMAGE="${AMBOOT}/mkimage_${SNAP_ARCH}"
+if [ -n "${SNAP_ARCH}" ]; then
+  HOST_IMAGE="${AMBOOT}/mkimage_${SNAP_ARCH}"
+else
+  if [ "$( uname -m)" = "aarch64" ]; then
+    HOST_IMAGE="${AMBOOT}/mkimage_arm64"
+  else
+    HOST_IMAGE="${AMBOOT}/mkimage_amd64"
+  fi
+fi
 ARCH=$(grep CONFIG_ARCH ${BOARD}/config.h | awk '{print $2}'| cut -c 13-)
 BSP=$(grep CONFIG_BSP ${BOARD}/config.h | awk '{print $2}'| cut -c 18-)
 CPU=$(grep CONFIG_CPU ${BOARD}/config.h | awk '{print $2}'| cut -c 12-)
