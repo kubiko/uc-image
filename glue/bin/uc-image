@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.3.7
+SCRIPT_VERSION=5.4.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -73,6 +73,9 @@ print_help () {
     echo "                           with the following syntax: <snap>=<track|channel/branch>"
     echo "                           examples: --snap go=1.14|stable"
     echo "                                     --snap avahi.snap"
+    echo "  --revisions              Specify a seeds.manifest file referencing the exact revisions"
+    echo "                           of the provided snaps which should be installed"
+    echo "                           seeds.manifest is auto generated as ubuntu-core-image.revisions"
     echo "  -c CHANNEL, --channel CHANNEL"
     echo "                           The snap channel to use, one of stable/candidate/beta/edge"
     echo "                           stable channel is assumed if no channel is defined"
@@ -703,6 +706,16 @@ while [ "$1" != "" ]; do
             BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
             shift
             ;;
+        --revisions)
+            f=$(validate_file ${2})
+            if [ -n "${f}" ] && [ -f ${f} ]; then
+                BUILDER_CONFIG["REVISIONS"]="--revisions ${f}"
+            else
+                print_debug 0 "wrong 'revisions' file was passed [ ${2} ]"
+                exit
+            fi
+            shift
+            ;;
         --preseed)
             BUILDER_CONFIG["PRESEED"]="--preseed"
             ;;
@@ -850,8 +863,11 @@ prepare_work_directory
 
 print_builder_config
 
+# always export snap revision manifest
+BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions"
+
 # run snap prepare image with all known parameters
-image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
 print_debug 1 "Running: ${image_build_command}"
 run_snap_prepare_image ${image_build_command} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}
 retVal=$(cat ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result)
@@ -904,7 +920,10 @@ else
   copy_release_files
 fi
 
-# create image manifest
+# create/copy image manifest
 generate_manifest
+if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions ]; then
+  cp ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions ${BUILDER_CONFIG["OUTPUT_DIR"]}
+fi
 
 print_debug 0 "\nOutput available in: '${BUILDER_CONFIG["OUTPUT_DIR"]}'"
