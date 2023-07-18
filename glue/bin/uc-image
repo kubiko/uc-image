@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.4.1
+SCRIPT_VERSION=5.5.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -58,100 +58,100 @@ SNAP_REQUIRED_INTERFACES="home mount-observe network-observe ssh-public-keys"
 
 # print help
 print_help () {
-    echo "Builder for UbuntuCore for images supporting fastboot like flash tool"
-    echo ""
-    echo "positional arguments:"
-    echo "  model_assertion          Path to the model assertion file. This argument must"
-    echo "                           be given unless the state machine is being resumed, in"
-    echo "                           which case it cannot be given."
-    echo ""
-    echo "optional arguments:"
-    echo "  -h, --help               show this help message and exit"
-    echo "  --snap SNAP              Install an extra snap."
-    echo "                           This is passed through to 'snap prepare-image'. The snap argument can include"
-    echo "                           additional information about the track|risk channel/branch"
-    echo "                           with the following syntax: <snap>=<track|channel/branch>"
-    echo "                           examples: --snap go=1.14|stable"
-    echo "                                     --snap avahi.snap"
-    echo "  --revisions              Specify a seeds.manifest file referencing the exact revisions"
-    echo "                           of the provided snaps which should be installed"
-    echo "                           seeds.manifest is auto generated as ubuntu-core-image.revisions"
-    echo "  -c CHANNEL, --channel CHANNEL"
-    echo "                           The snap channel to use, one of stable/candidate/beta/edge"
-    echo "                           stable channel is assumed if no channel is defined"
-    echo "                           example: -c edge"
-    echo "  --preseed                Pressed the image."
-    echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
-    echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
-    echo "         (--sysfs-overlay) This required when building images with specific hw interfaces"
-    echo "  -d, --debug              print debug"
-    echo "  -dd                      print verbose debugs"
-    echo "  -v|--version"
-    echo "                           print version of the script"
-    echo ""
-    echo "Common options:"
-    echo "  --disk-info DISK-INFO-CONTENTS"
-    echo "                           File to be used as .disk/info on the image's rootfs."
-    echo "                           This file can contain useful information about the"
-    echo "                           target image, like image identification data, system"
-    echo "                           name, build timestamp etc."
-    echo "  -O DIRECTORY, --output-dir DIRECTORY"
-    echo "                           The directory in which to put generated disk image"
-    echo "                           files."
-    echo "  -w DIRECTORY, --workdir  DIRECTORY"
-    echo "                           The working directory in which to download and unpack"
-    echo "                           all the source/snap files for the image. This directory can"
-    echo "                           exist or not, and it is not removed after this program"
-    echo "                           exits. If not given, a temporary working directory is"
-    echo "                           used instead under /tmp"
-    echo " --build-raw               Build raw image, instead of sparse one"
-    echo "                           Cannot be used in combination with --use-android-fs-tools!!!"
-    echo " --use-android-fs-tools    Use android make_ext4fs instead of mkfs.ext4"
-    echo " --auto-import-assertion   ASSERTION FILE"
-    echo "                           Auto import assertion file to be included in root of main writable partiton."
-    echo "                           This assertion is imported once system is fully seeded"
-    echo "                           Passed file does not need to have correct file name, it will be renamed"
-    echo " --set-to-factory-reset    !!Experimental!!"
-    echo "                           This option will set snapd_recovery_mode to \"factory-reset\""
-    echo "                           System should perform factory-reset while, preserving ubuntu-save content."
-    echo "                           This is experimental feature and it's not guranteed to work, especially"
-    echo "                           disk layout had changed"
-    echo "                           If \"ubuntu-seed-device-dir\" is not provide, ubuntu-seed partition won't be created."
-    echo "                           Instead ubuntu-seed directory will be copied to the output directory."
-    echo "--ubuntu-seed-device-dir   !!Experimental!!"
-    echo "                           Requires set-to-factory-reset to be set!"
-    echo "                           ubuntu-seed device directory to be included in the built seed image"
-    echo "                           This option provides ability to build device specific image."
-    echo "                           Created image is only usable on the device from which \"device\" directory"
-    echo "                           was exported."
-    echo ""
-    echo "--build-tar-seed           Build seed image as tar ball(no compression needed)"
-    echo "                           Use this option to update existing devices with ssh access"
-    echo "                           This can be used with 'set-to-factory-reset' without need to provide"
-    echo "                           'ubuntu-seed-device-dir' with sealed encryption keys'"
-    echo ""
-    echo "--build-dir-seed           Build seed image as directory"
-    echo "                           Use this option to update existing devices with ssh access"
-    echo "                           This can be used with 'set-to-factory-reset' without need to provide"
-    echo "                           'ubuntu-seed-device-dir' with sealed encryption keys'"
-    echo ""
-    echo "--build-compresed-seed     Build compressed ubuntu-seed fs image."
-    echo "                           Use this to option to build compressed, unsparsed ubuntu-seed partition image."
-    echo "                           Such a image can be sed for flash device from running system with xzcat, e.g"
-    echo "                             $ xzcat <ubuntu-seed.img.xz> | pv | sudo dd of=<target part> bs=256M;sync"
-    echo ""
-    echo "Builder supports default settings passed through environment variables"
-    echo "Supported env variables:"
-    echo "    UC_IMAGE_SEARCH_PATH:  Colon separated search paths to use to search for passed file parameters"
-    echo "                           if not provided with absolute or relative path."
-    echo "                           First successful find is used."
-    echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion"
-    echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
-    echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
-    echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
-    echo "                           If not defined or passed as param, tmp directory is created"
-    echo "    UC_IMAGE_OUTPUT_DIR:   Default output directory"
-    echo "                           If not defined or passed as param, 'uci-<model name>' directory will be created in current directory"
+  echo "Builder for UbuntuCore for images supporting fastboot like flash tool"
+  echo ""
+  echo "positional arguments:"
+  echo "  model_assertion          Path to the model assertion file. This argument must"
+  echo "                           be given unless the state machine is being resumed, in"
+  echo "                           which case it cannot be given."
+  echo ""
+  echo "optional arguments:"
+  echo "  -h, --help               show this help message and exit"
+  echo "  --snap SNAP              Install an extra snap."
+  echo "                           This is passed through to 'snap prepare-image'. The snap argument can include"
+  echo "                           additional information about the track|risk channel/branch"
+  echo "                           with the following syntax: <snap>=<track|channel/branch>"
+  echo "                           examples: --snap go=1.14|stable"
+  echo "                                     --snap avahi.snap"
+  echo "  --revisions              Specify a seeds.manifest file referencing the exact revisions"
+  echo "                           of the provided snaps which should be installed"
+  echo "                           seeds.manifest is auto generated as ubuntu-core-image.revisions"
+  echo "  -c CHANNEL, --channel CHANNEL"
+  echo "                           The snap channel to use, one of stable/candidate/beta/edge"
+  echo "                           stable channel is assumed if no channel is defined"
+  echo "                           example: -c edge"
+  echo "  --preseed                Pressed the image."
+  echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
+  echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
+  echo "         (--sysfs-overlay) This required when building images with specific hw interfaces"
+  echo "  -d, --debug              print debug"
+  echo "  -dd                      print verbose debugs"
+  echo "  -v|--version"
+  echo "                           print version of the script"
+  echo ""
+  echo "Common options:"
+  echo "  --disk-info DISK-INFO-CONTENTS"
+  echo "                           File to be used as .disk/info on the image's rootfs."
+  echo "                           This file can contain useful information about the"
+  echo "                           target image, like image identification data, system"
+  echo "                           name, build timestamp etc."
+  echo "  -O DIRECTORY, --output-dir DIRECTORY"
+  echo "                           The directory in which to put generated disk image"
+  echo "                           files."
+  echo "  -w DIRECTORY, --workdir  DIRECTORY"
+  echo "                           The working directory in which to download and unpack"
+  echo "                           all the source/snap files for the image. This directory can"
+  echo "                           exist or not, and it is not removed after this program"
+  echo "                           exits. If not given, a temporary working directory is"
+  echo "                           used instead under /tmp"
+  echo " --build-raw               Build raw image, instead of sparse one"
+  echo "                           Cannot be used in combination with --use-android-fs-tools!!!"
+  echo " --use-android-fs-tools    Use android make_ext4fs instead of mkfs.ext4"
+  echo " --auto-import-assertion   ASSERTION FILE"
+  echo "                           Auto import assertion file to be included in root of main writable partiton."
+  echo "                           This assertion is imported once system is fully seeded"
+  echo "                           Passed file does not need to have correct file name, it will be renamed"
+  echo " --set-to-factory-reset    !!Experimental!!"
+  echo "                           This option will set snapd_recovery_mode to \"factory-reset\""
+  echo "                           System should perform factory-reset while, preserving ubuntu-save content."
+  echo "                           This is experimental feature and it's not guranteed to work, especially"
+  echo "                           disk layout had changed"
+  echo "                           If \"ubuntu-seed-device-dir\" is not provide, ubuntu-seed partition won't be created."
+  echo "                           Instead ubuntu-seed directory will be copied to the output directory."
+  echo "--ubuntu-seed-device-dir   !!Experimental!!"
+  echo "                           Requires set-to-factory-reset to be set!"
+  echo "                           ubuntu-seed device directory to be included in the built seed image"
+  echo "                           This option provides ability to build device specific image."
+  echo "                           Created image is only usable on the device from which \"device\" directory"
+  echo "                           was exported."
+  echo ""
+  echo "--build-tar-seed           Build seed image as tar ball(no compression needed)"
+  echo "                           Use this option to update existing devices with ssh access"
+  echo "                           This can be used with 'set-to-factory-reset' without need to provide"
+  echo "                           'ubuntu-seed-device-dir' with sealed encryption keys'"
+  echo ""
+  echo "--build-dir-seed           Build seed image as directory"
+  echo "                           Use this option to update existing devices with ssh access"
+  echo "                           This can be used with 'set-to-factory-reset' without need to provide"
+  echo "                           'ubuntu-seed-device-dir' with sealed encryption keys'"
+  echo ""
+  echo "--build-compresed-seed     Build compressed ubuntu-seed fs image."
+  echo "                           Use this to option to build compressed, unsparsed ubuntu-seed partition image."
+  echo "                           Such a image can be sed for flash device from running system with xzcat, e.g"
+  echo "                             $ xzcat <ubuntu-seed.img.xz> | pv | sudo dd of=<target part> bs=256M;sync"
+  echo ""
+  echo "Builder supports default settings passed through environment variables"
+  echo "Supported env variables:"
+  echo "    UC_IMAGE_SEARCH_PATH:  Colon separated search paths to use to search for passed file parameters"
+  echo "                           if not provided with absolute or relative path."
+  echo "                           First successful find is used."
+  echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion"
+  echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
+  echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
+  echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
+  echo "                           If not defined or passed as param, tmp directory is created"
+  echo "    UC_IMAGE_OUTPUT_DIR:   Default output directory"
+  echo "                           If not defined or passed as param, 'uci-<model name>' directory will be created in current directory"
 }
 
 # normalize version
@@ -365,38 +365,38 @@ determine_bootloader () {
 # first hit is used
 # function returns absolute path to the file if file is validated or none
 validate_file () {
-    local file=${1}
-    if [ -n "${file}" ]; then
-        if [ ! -e ${file} ]; then
-            # only use when we actually have search path
-            if [ -n "${BUILDER_CONFIG["SEARCH_PATH"]}" ]; then
-                IFS=":"
-                for p in ${BUILDER_CONFIG["SEARCH_PATH"]}
-                do
-                    if [ -e ${p}/${file} ]; then
-                        echo $(${READLINK} -f ${p}/${file})
-                        return
-                    fi
-                done
-            fi
-        else
-            echo $(${READLINK} -f ${file})
-        fi
+  local file=${1}
+  if [ -n "${file}" ]; then
+    if [ ! -e ${file} ]; then
+      # only use when we actually have search path
+      if [ -n "${BUILDER_CONFIG["SEARCH_PATH"]}" ]; then
+        IFS=":"
+        for p in ${BUILDER_CONFIG["SEARCH_PATH"]}
+        do
+          if [ -e ${p}/${file} ]; then
+            echo $(${READLINK} -f ${p}/${file})
+            return
+          fi
+        done
+      fi
+    else
+      echo $(${READLINK} -f ${file})
     fi
+  fi
 }
 
 # validate passed snap
 # passed snap can be either snap name from store or local file
 # function return either snap name or absolute path to snap file
 validate_snap () {
-    local s="${1}"
-    if [ "${s: -5}" = ".snap" ]; then
-        # check if local snap file exists
-        echo "$(validate_file ${s})"
-    else
-        # store snap
-        echo "${s}"
-    fi
+  local s="${1}"
+  if [ "${s: -5}" = ".snap" ]; then
+    # check if local snap file exists
+    echo "$(validate_file ${s})"
+  else
+    # store snap
+    echo "${s}"
+  fi
 }
 
 # normalise passed size to kilo bytes
@@ -405,11 +405,11 @@ validate_snap () {
 normalise_size_to_kb () {
   local size=${1}
   case $size in
-     (0)  size="0" ;;
-     (*G | *g) size=$(expr $(echo $size | sed -e 's/G//g' -e 's/g//g') \* 1024 \* 1024) ;;
-     (*M | *m) size=$(expr $(echo $size | sed -e 's/M//g' -e 's/m//g') \* 1024) ;;
-     (*K | *k) size=$(echo $size | sed -e 's/K//g' -e 's/k//g') ;;
-     (*) size=$(expr $size / 1024) ;;
+    (0)  size="0" ;;
+    (*G | *g) size=$(expr $(echo $size | sed -e 's/G//g' -e 's/g//g') \* 1024 \* 1024) ;;
+    (*M | *m) size=$(expr $(echo $size | sed -e 's/M//g' -e 's/m//g') \* 1024) ;;
+    (*K | *k) size=$(echo $size | sed -e 's/K//g' -e 's/k//g') ;;
+    (*) size=$(expr $size / 1024) ;;
   esac
   echo ${size}
 }
@@ -693,125 +693,125 @@ provision_macOS_system
 BUILDER_CONFIG["ARGS"]="$@"
 # parse passed parameters
 while [ "$1" != "" ]; do
-    case $1 in
-        -c | --channel)
-            BUILDER_CONFIG["CHANNEL"]="--channel ${2}"
-            shift
-            ;;
-        --snap=*)
-            EX_SNAP=$(echo ${1} | awk -F= '{print $2}')
-            BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${EX_SNAP})"
-            ;;
-        --snap)
-            BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
-            shift
-            ;;
-        --revisions)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                BUILDER_CONFIG["REVISIONS"]="--revisions ${f}"
-            else
-                print_debug 0 "wrong 'revisions' file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --preseed)
-            BUILDER_CONFIG["PRESEED"]="--preseed"
-            ;;
-        --preseed-sign-key)
-            BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key ${2}"
-            shift
-            ;;
-        --preseed-sysfs-overlay | --sysfs-overlay)
-            BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay ${2}"
-            shift
-            ;;
-        -O | --output-dir)
-            BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f ${2})"
-            if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
-              print_debug 0 "Passed output directory cannot be created!!"
-              exit
-            fi
-            shift
-            ;;
-        -w | --workdir)
-            BUILDER_CONFIG["WORK_DIR"]="$(${READLINK} -f ${2})"
-            shift
-            ;;
-        --auto-import-assertion)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                 BUILDER_CONFIG["ASSERTION_IMPORT"]="${f}"
-            else
-                 print_debug 0 "wrong assertion file to import was passed [ ${2} ]"
-                 exit
-            fi
-            shift
-            ;;
-        --disk-info)
-            f=$(validate_file ${2})
-            if [ -n "${f}" ] && [ -f ${f} ]; then
-                BUILDER_CONFIG["DISK_INFO_CONTENTS"]="${f}"
-            else
-                print_debug 0 "wrong disk info file was passed [ ${2} ]"
-                exit
-            fi
-            shift
-            ;;
-        --set-to-factory-reset)
-            BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]="factory-reset"
-            ;;
-        --ubuntu-seed-device-dir)
-            if [ -n "${2}" ]; then
-                BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]="${2}"
-            else
-               print_debug 0 "Missing ubuntu-seed-device-dir parameter"
-            fi
-            shift
-            ;;
-        --help | -h)
-            print_help
-            exit
-            ;;
-        --build-raw)
-            BUILDER_CONFIG["BUILD_RAW"]="true"
-            ;;
-        --use-android-fs-tools)
-            BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
-            ;;
-        --build-compresed-seed)
-            BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
-            ;;
-        --build-tar-seed)
-            BUILDER_CONFIG["BUILD_TAR_SEED"]="true"
-            ;;
-        --build-dir-seed)
-            BUILDER_CONFIG["BUILD_DIR_SEED"]="true"
-            ;;
-        -d | --debug)
-            BUILDER_CONFIG["DEBUG_LEVEL"]=3
-            ;;
-        -dd)
-            BUILDER_CONFIG["DEBUG_LEVEL"]=5
-            ;;
-        -v | --version)
-            echo -e "version: ${SCRIPT_VERSION}"
-            exit 0
-            ;;
-        *)
-            # check if this is model assertion
-            ma=$(validate_file ${1})
-            if [ -n "${ma}" ]; then
-                BUILDER_CONFIG["MODEL_ASSERTION"]=${ma}
-            else
-                print_debug 0 "Unknown parameter '$1'"
-                print_help
-                exit
-            fi
-            ;;
-    esac
-    shift
+  case $1 in
+    -c | --channel)
+      BUILDER_CONFIG["CHANNEL"]="--channel ${2}"
+      shift
+      ;;
+    --snap=*)
+      EX_SNAP=$(echo ${1} | awk -F= '{print $2}')
+      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${EX_SNAP})"
+      ;;
+    --snap)
+      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
+      shift
+      ;;
+    --revisions)
+      f=$(validate_file ${2})
+      if [ -n "${f}" ] && [ -f ${f} ]; then
+        BUILDER_CONFIG["REVISIONS"]="--revisions=${f}"
+      else
+        print_debug 0 "wrong 'revisions' file was passed [ ${2} ]"
+        exit
+      fi
+      shift
+      ;;
+    --preseed)
+      BUILDER_CONFIG["PRESEED"]="--preseed"
+      ;;
+    --preseed-sign-key)
+      BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key ${2}"
+      shift
+      ;;
+    --preseed-sysfs-overlay | --sysfs-overlay)
+      BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay ${2}"
+      shift
+      ;;
+    -O | --output-dir)
+      BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f ${2})"
+      if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
+        print_debug 0 "Passed output directory cannot be created!!"
+        exit
+      fi
+      shift
+      ;;
+    -w | --workdir)
+      BUILDER_CONFIG["WORK_DIR"]="$(${READLINK} -f ${2})"
+      shift
+      ;;
+    --auto-import-assertion)
+      f=$(validate_file ${2})
+      if [ -n "${f}" ] && [ -f ${f} ]; then
+        BUILDER_CONFIG["ASSERTION_IMPORT"]="${f}"
+      else
+        print_debug 0 "wrong assertion file to import was passed [ ${2} ]"
+        exit
+      fi
+      shift
+      ;;
+    --disk-info)
+      f=$(validate_file ${2})
+      if [ -n "${f}" ] && [ -f ${f} ]; then
+        BUILDER_CONFIG["DISK_INFO_CONTENTS"]="${f}"
+      else
+        print_debug 0 "wrong disk info file was passed [ ${2} ]"
+        exit
+      fi
+      shift
+      ;;
+    --set-to-factory-reset)
+      BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]="factory-reset"
+      ;;
+    --ubuntu-seed-device-dir)
+      if [ -n "${2}" ]; then
+        BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]="${2}"
+      else
+        print_debug 0 "Missing ubuntu-seed-device-dir parameter"
+      fi
+      shift
+      ;;
+    --help | -h)
+      print_help
+      exit
+      ;;
+    --build-raw)
+      BUILDER_CONFIG["BUILD_RAW"]="true"
+      ;;
+    --use-android-fs-tools)
+      BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
+      ;;
+    --build-compresed-seed)
+      BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
+      ;;
+    --build-tar-seed)
+      BUILDER_CONFIG["BUILD_TAR_SEED"]="true"
+      ;;
+    --build-dir-seed)
+      BUILDER_CONFIG["BUILD_DIR_SEED"]="true"
+      ;;
+    -d | --debug)
+      BUILDER_CONFIG["DEBUG_LEVEL"]=3
+      ;;
+    -dd)
+      BUILDER_CONFIG["DEBUG_LEVEL"]=5
+      ;;
+    -v | --version)
+      echo -e "version: ${SCRIPT_VERSION}"
+      exit 0
+      ;;
+    *)
+      # check if this is model assertion
+      ma=$(validate_file ${1})
+      if [ -n "${ma}" ]; then
+        BUILDER_CONFIG["MODEL_ASSERTION"]=${ma}
+      else
+        print_debug 0 "Unknown parameter '$1'"
+        print_help
+        exit
+      fi
+      ;;
+  esac
+  shift
 done
 
 if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ] && [ -z "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ]; then
