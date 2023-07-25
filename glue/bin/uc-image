@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.5.1
+SCRIPT_VERSION=5.5.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -657,6 +657,11 @@ generate_manifest () {
   echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
   echo -e "$(date)" >> ${IMAGE_MANIFEST}
   echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
+  # add uc-image revision info
+  if [ -z "${SNAP_REVISION}" ]; then
+    local SNAP_REVISION="$(snap list uc-image | tail -1 | awk '{print $3}')"
+  fi
+  echo -e "\n### uc-image revision ####\n  revision: ${SNAP_REVISION}\tversion: ${SCRIPT_VERSION}" >> ${IMAGE_MANIFEST}
   echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
   if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml 1> /dev/null 2>&1; then
     cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
