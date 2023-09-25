@@ -16,7 +16,7 @@
 # Copyright (C) 2023 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=5.5.3
+SCRIPT_VERSION=5.5.4
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -635,11 +635,13 @@ run_amba_image_build () {
   # we have two types of amba firmware, legacy and flexible
   # determine which one we are building based on
   if [ -e .uc-image-config ]; then
+    print_debug 2 "build-amba-images ${BUILDER_CONFIG["WORK_DIR"]}/amba-build ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images ${BUILDER_CONFIG["OUTPUT_DIR"]}"
     build-amba-images \
       ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
       ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
       ${BUILDER_CONFIG["OUTPUT_DIR"]}
   elif [ -e .uc-image-flexible-config ]; then
+    print_debug 2 "build-amba-images-flexible ${BUILDER_CONFIG["WORK_DIR"]}/amba-build ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images ${BUILDER_CONFIG["OUTPUT_DIR"]}"
     build-amba-images-flexible \
       ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
       ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
