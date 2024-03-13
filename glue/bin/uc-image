@@ -43,7 +43,7 @@ BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
 # gpt_* : partition table files
 # Qualcomm flash supporting files flashall, rawprogram*, patch*, prog_fire*
 # dragonboard 410c: sbc_1.0_8016.bin
-BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed.* imx-boot.* bst_release.bin.signed reflash-system.sh"
+BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed*.imx imx-boot.* bst_release.bin.signed reflash-system.sh"
 
 # delete all logs
 rm -rf $(dirname $(mktemp -u -t uc-image-builder-XXXX))/uc-image-builder-* 2> /dev/null
