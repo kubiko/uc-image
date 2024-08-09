@@ -92,7 +92,7 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
+      SNAPPY_STORE_NO_CDN=1 snap download snapd --stable
       unsquashfs -f -d ${SNAPCRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
 
   yq:
