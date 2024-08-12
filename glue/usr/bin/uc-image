@@ -106,7 +106,7 @@ print_help () {
   echo "                           used instead under /tmp"
   echo " --build-raw               Build raw image, instead of sparse one"
   echo "                           Cannot be used in combination with --use-android-fs-tools!!!"
-  echo " --use-android-fs-tools    Use android make_ext4fs instead of mkfs.ext4"
+  echo " --use-android-fs-tools    Use android 'mke2fs -t ext4' instead of mkfs.ext4"
   echo " --auto-import-assertion   ASSERTION FILE"
   echo "                           Auto import assertion file to be included in root of main writable partiton."
   echo "                           This assertion is imported once system is fully seeded"
@@ -479,8 +479,8 @@ create_disk_image() {
   local target_image="${volume_image}.img"
   # build ext4 disk image
   if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]} make_ext4fs \
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -t ext4 -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
+    ${BUILDER_CONFIG["FAKEROOT"]} mke2fs -t ext4 \
        -L ${volume_label} \
        -l ${volume_size} \
        -s \

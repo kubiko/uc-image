@@ -156,7 +156,7 @@ parts:
   android-mkfs-tools:
     plugin: nil
     stage-packages:
-      - android-sdk-ext4-utils
+      - android-sdk-platform-tools
 
   lk-boot-env:
     plugin: nil
