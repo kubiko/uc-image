@@ -114,14 +114,6 @@ parts:
     stage-packages:
       - rhash
 
-  etc-assets:
-    plugin: nil
-    override-build: |
-      # copy etc assets from core18 we might need during backdoor tasks
-      mkdir -p ${CRAFT_PART_INSTALL}/etc/ssh
-      cp -r /snap/core20/current/etc/skel ${CRAFT_PART_INSTALL}/etc
-      cp /snap/core20/current/etc/ssh/sshd_config ${CRAFT_PART_INSTALL}/etc/ssh
-
   gcc:
     plugin: nil
     override-build: |
