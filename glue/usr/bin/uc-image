@@ -105,8 +105,6 @@ print_help () {
   echo "                           exits. If not given, a temporary working directory is"
   echo "                           used instead under /tmp"
   echo " --build-raw               Build raw image, instead of sparse one"
-  echo "                           Cannot be used in combination with --use-android-fs-tools!!!"
-  echo " --use-android-fs-tools    Use android 'mke2fs -t ext4' instead of mkfs.ext4"
   echo " --auto-import-assertion   ASSERTION FILE"
   echo "                           Auto import assertion file to be included in root of main writable partiton."
   echo "                           This assertion is imported once system is fully seeded"
@@ -478,15 +476,7 @@ create_disk_image() {
   local volume_size="${4}"
   local target_image="${volume_image}.img"
   # build ext4 disk image
-  if [ "${BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]}" = "true" ]; then
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -t ext4 -L ${volume_label} -l ${volume_size} -s ${volume_image}.img ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]} mke2fs -t ext4 \
-       -L ${volume_label} \
-       -l ${volume_size} \
-       -s \
-       ${volume_image}.img \
-       ${volume_source} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-  elif [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
+  if [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
     print_debug 1 "\nCreating tarball for ${volume_label}"
     print_debug 2 "tar -cf ${volume_image}.tar ${volume_source}"
     ${BUILDER_CONFIG["FAKEROOT"]} tar -cf ${volume_image}.tar ${volume_source}
@@ -783,9 +773,6 @@ while [ "$1" != "" ]; do
       ;;
     --build-raw)
       BUILDER_CONFIG["BUILD_RAW"]="true"
-      ;;
-    --use-android-fs-tools)
-      BUILDER_CONFIG["USE_ANDROID_FS_TOOLS"]="true"
       ;;
     --build-compresed-seed)
       BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
