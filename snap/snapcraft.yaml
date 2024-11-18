@@ -88,8 +88,17 @@ parts:
   snap-client:
     plugin: nil
     override-build: |
-      SNAPPY_STORE_NO_CDN=1 snap download snapd --edge
-      unsquashfs -f -d ${CRAFT_PART_INSTALL} snapd*.snap usr/bin/snap
+      export GOPATH="${CRAFT_PART_BUILD}/go"
+      mkdir -p ${CRAFT_PART_BUILD}/go/src/github.com/snapcore
+      git clone --depth=1 https://github.com/canonical/snapd.git -b master ${CRAFT_PART_BUILD}/go/src/github.com/snapcore/snapd
+      cd ${CRAFT_PART_BUILD}/go/src/github.com/snapcore/snapd
+      ./get-deps.sh
+      export GOARCH=${CRAFT_ARCH_BUILD_FOR}
+      export CGO_ENABLED=1
+      export CC=${CRAFT_ARCH_TRIPLET_BUILD_FOR}-gcc
+      export FARCH=${CRAFT_ARCH_BUILD_FOR}
+      mkdir -p ${CRAFT_PART_INSTALL}/usr/lib/snapd
+      go build -mod=vendor  -buildmode=pie -tags nomanagers -ldflags "-s -w"  -o  ${CRAFT_PART_INSTALL}/usr/bin/snap ${PWD}/cmd/snap
 
   yq:
     plugin: go
