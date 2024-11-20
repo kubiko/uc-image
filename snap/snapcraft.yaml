@@ -4,7 +4,7 @@ description: |
  Toolset to build emmc ubuntu core images for various boards, supporting custom flash tools.
  Created images can be used with tools like fastboot, uuu(mfgtools)
 
-confinement: strict
+confinement: classic
 grade: stable
 adopt-info: glue
 base: core24
@@ -14,10 +14,10 @@ platforms:
   amd64:
 
 environment:
-    PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$SNAP/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/bin:$SNAP/aarch64-linux-gnu/bin:$PATH
-    LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/android
-    LANG:            C
-    PYTHONPATH:      $SNAP/usr/lib/python3/dist-packages
+  PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$SNAP/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/bin:$SNAP/aarch64-linux-gnu/bin:$PATH
+  LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/android
+  LANG:            C
+  PYTHONPATH:      $SNAP/usr/lib/python3/dist-packages
 
 layout:
   /etc/mke2fs.conf:
@@ -26,14 +26,8 @@ layout:
     bind-file: $SNAP/etc/mtools.conf
 
 apps:
-    uc-image:
-        command: usr/bin/uc-image
-        plugs:
-            - home
-            - mount-observe
-            - network-observe
-            - removable-media
-            - ssh-public-keys
+  uc-image:
+    command: usr/bin/uc-image
 
 parts:
   tools:
