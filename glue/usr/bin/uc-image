@@ -221,24 +221,6 @@ check_snap_environment () {
     echo "Detected non snap environment execution (running unconfined)"
     return
   fi
-  # ensure we have all the interfaces connected
-  local missing_connections=""
-  for plug in ${SNAP_REQUIRED_INTERFACES}
-  do
-    if ! snapctl is-connected ${plug}; then
-      missing_connections="${missing_connections}${plug} "
-    fi
-  done
-
-  if [ -n "${missing_connections}" ]; then
-    echo "Snap does not have connected plugs required for its function, please connected them"
-    echo "By running:"
-    for p in ${missing_connections}
-    do
-      echo -e "\t$ snap connect ${SNAP_INSTANCE_NAME}:${p}"
-    done
-    exit 0
-  fi
 
   # check we are not running as root
   if [ "$USER" =  "root" ] && [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
