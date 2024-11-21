@@ -79,20 +79,6 @@ parts:
       version=$(grep -m 1 "SCRIPT_VERSION=" ${CRAFT_PART_INSTALL}/usr/bin/uc-image | awk -F '=' '{print $2}')
       craftctl set version="${version}"
 
-  snap-client:
-    plugin: nil
-    override-build: |
-      # determine latest release version
-      latest_release=$(git ls-remote --refs  --sort='version:refname' https://github.com/canonical/snapd.git "refs/heads/release/*" | tail -1 | awk -F '/' '{print $3"/"$4}')
-      export GOPATH="${CRAFT_PART_BUILD}/go"
-      mkdir -p "${CRAFT_PART_BUILD}/go/src/github.com/snapcore"
-      git clone --depth=1 https://github.com/canonical/snapd.git -b "${latest_release}" "${CRAFT_PART_BUILD}/go/src/github.com/snapcore/snapd"
-      cd "${CRAFT_PART_BUILD}/go/src/github.com/snapcore/snapd"
-      ./get-deps.sh
-      ./mkversion.sh
-      mkdir -p "${CRAFT_PART_INSTALL}/usr/lib/snapd"
-      go build -mod=vendor  -buildmode=pie -tags nomanagers -ldflags "-s -w" -o "${CRAFT_PART_INSTALL}/usr/bin/snap" github.com/snapcore/snapd/cmd/snap
-
   yq:
     plugin: go
     source: https://github.com/mikefarah/yq.git
