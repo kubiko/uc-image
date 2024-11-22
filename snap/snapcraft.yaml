@@ -86,8 +86,6 @@ parts:
   yq:
     plugin: go
     source: https://github.com/mikefarah/yq.git
-    build-attributes:
-      - enable-patchelf
     override-pull: |
       # pull latest tag
       git_url="https://github.com/mikefarah/yq.git"

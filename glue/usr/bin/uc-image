@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.0.1
+SCRIPT_VERSION=7.0.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -30,6 +30,8 @@ else
   # use fakeroot by default
   BUILDER_CONFIG["FAKEROOT"]="fakeroot"
 fi
+
+YQ="${SNAP}/usr/bin/yq"
 
 # fill in default values
 BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
@@ -211,6 +213,7 @@ provision_macOS_system () {
       echo -e "!!! Script is outdated, download new one from ${url} !!!\n"
       exit 0
     fi
+    YQ="yq"
   fi
 }
 
@@ -310,8 +313,8 @@ determine_bootloader () {
     fi
   done
 
-  print_debug 5 "bootloader: yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
-  BUILDER_CONFIG["BOOTLOADER"]="$(yq eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
+  print_debug 5 "bootloader: ${YQ} eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
+  BUILDER_CONFIG["BOOTLOADER"]="$("${YQ}" eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
   print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
   BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
 
@@ -321,7 +324,7 @@ determine_bootloader () {
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
     # check if we have defined dtb
-    BUILDER_CONFIG["DTB"]=$(yq eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
+    BUILDER_CONFIG["DTB"]=$("${YQ}" eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     ## lk
     BUILDER_CONFIG["BOOTLOADER"]="lk"
@@ -513,7 +516,7 @@ create_ubuntu_seed_partition_image () {
   print_debug 1 "\nCreating ubuntu-seed partition image"
 
   # calculate ubuntu-seed part size
-  local seed_size_human=$(yq eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
+  local seed_size_human=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
 
   create_disk_image \
@@ -549,7 +552,7 @@ copy_release_files () {
     BUILDER_CONFIG["IMAGE_ROOT"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
   fi
   # copy gadget boot assets files if making normal release
-  for f in $(yq eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
+  for f in $("${YQ}" eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
   do
     if [ -e ${BUILDER_CONFIG["GADGET_DIR"]}/${f} ]; then
       cp ${BUILDER_CONFIG["GADGET_DIR"]}/${f} \
