@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.0.2
+SCRIPT_VERSION=7.1.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -246,9 +246,9 @@ print_debug () {
   [ "${BUILDER_CONFIG["DEBUG_LEVEL"]}" -ge "${level}" ] && echo -e "$@"
   # if work dir does not exist yet, log to tmp log file
   if [ -e "${BUILDER_CONFIG["TMP_LOG_FILE"]}" ]; then
-    echo -e "$@" >> ${BUILDER_CONFIG["TMP_LOG_FILE"]}
+    echo -e -n "$@" >> ${BUILDER_CONFIG["TMP_LOG_FILE"]}
   else
-    echo -e "$@" >> ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+    echo -e -n "$@" >> ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
   fi
 }
 
@@ -453,13 +453,15 @@ disk_info_contents () {
 # passed parameters (not all are used, depending on created volume image)
 # - volume source
 # - target volume image, without file type, it will be added
+# - fstype
 # - volume label
 # - volume size
 create_disk_image() {
   local volume_source="${1}"
   local volume_image="${2}"
-  local volume_label="${3}"
-  local volume_size="${4}"
+  local fs_type="${3}"
+  local volume_label="${4}"
+  local volume_size="${5}"
   local target_image="${volume_image}.img"
   # build ext4 disk image
   if [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
@@ -472,13 +474,14 @@ create_disk_image() {
     print_debug 1 "\nSkipping file system image step for ${volume_label}, as it's not required by the build type."
     target_image="${volume_source}"
   else
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-    ${BUILDER_CONFIG["FAKEROOT"]} mkfs.ext4 \
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t "${fs_type}" -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+    ${BUILDER_CONFIG["FAKEROOT"]} mke2fs \
       -O \
       -metadata_csum \
       -T default \
       -E root_owner=0:0 \
       -O uninit_bg \
+      -t "${fs_type}" \
       -L ${volume_label} \
       -d ${volume_source} ${volume_image}.raw \
       ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
@@ -518,12 +521,39 @@ create_ubuntu_seed_partition_image () {
   # calculate ubuntu-seed part size
   local seed_size_human=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
   local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
-
+  local fs_type
+  fs_type=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .filesystem' ${BUILDER_CONFIG["GADGET_YAML"]})
   create_disk_image \
       ${BUILDER_CONFIG["IMAGE_ROOT"]} \
       ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed \
+      "${fs_type}" \
       "ubuntu-seed" \
       ${SEED_SIZE}
+}
+
+create_non_ubuntu_partions_images () {
+  print_debug 1 "\nCreating non Ubuntu partitions images"
+  local partitions
+  local size
+  local fs_type
+  local converted_size
+  rm -rf ${BUILDER_CONFIG["WORK_DIR"]}/partitions
+  partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and (.name != "ubuntu-*")) | .name' ${BUILDER_CONFIG["GADGET_YAML"]})
+  for p_name in ${partitions}
+  do
+    print_debug 2 "\nCreating part image for partition: ${p_name}"
+    size=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .size' "${BUILDER_CONFIG["GADGET_YAML"]}")
+    fs_type=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .filesystem' "${BUILDER_CONFIG["GADGET_YAML"]}")
+    converted_size="$(normalise_size_to_kb ${size})k"
+    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}"
+    # TODO: support preseeded content from gadget snap
+    create_disk_image \
+      "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}" \
+      "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}" \
+      "${fs_type}" \
+      "${p_name}" \
+      "${converted_size}"
+  done
 }
 
 copy_release_files () {
@@ -551,6 +581,7 @@ copy_release_files () {
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed
     BUILDER_CONFIG["IMAGE_ROOT"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
   fi
+
   # copy gadget boot assets files if making normal release
   for f in $("${YQ}" eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
   do
@@ -559,6 +590,7 @@ copy_release_files () {
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/
     fi
   done
+
   # copy over special files e.g. gpt_*, uc.lst. Assume use of wild cards
   for sf in ${BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]}
   do
@@ -568,10 +600,21 @@ copy_release_files () {
         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
     fi
   done
+
   # if booloader is lk, copy over boot image
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
        ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+  fi
+
+  # copy(move) additional partition images if any
+  if ls "${BUILDER_CONFIG["WORK_DIR"]}/partitions/"*.img 1> /dev/null 2>&1; then
+    mv "${BUILDER_CONFIG["WORK_DIR"]}/partitions/"*.img \
+       "${BUILDER_CONFIG["OUTPUT_DIR"]}"
+  fi
+  if ls "${BUILDER_CONFIG["WORK_DIR"]}/partitions/"*.tar 1> /dev/null 2>&1; then
+    mv "${BUILDER_CONFIG["WORK_DIR"]}/partitions/"*.tar \
+       "${BUILDER_CONFIG["OUTPUT_DIR"]}"
   fi
 }
 
@@ -869,6 +912,9 @@ mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
 if [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" != "true" ]; then
   create_ubuntu_seed_partition_image
 fi
+
+# create images for non-ubuntu partitions if needed
+create_non_ubuntu_partions_images
 
 # copy release files to output directory or run amba image build
 # if we are building system-seed image, do not run amba_image_build
