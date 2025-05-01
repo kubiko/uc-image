@@ -16,12 +16,12 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.1.0
+SCRIPT_VERSION=7.2.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
 
-if [ -n "$(uname -a | grep Darwin)" ]; then
+if uname -a | grep -q "Darwin"; then
   READLINK="greadlink"
   # do not use fakeroot by default
   BUILDER_CONFIG["FAKEROOT"]=""
@@ -49,15 +49,13 @@ BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
 BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed*.imx imx-boot.* bst_release.bin.signed reflash-system.sh flash-uc.sh Flash_Writer_* fip- bl2_*"
 
 # delete all logs
-rm -rf $(dirname $(mktemp -u -t uc-image-builder-XXXX))/uc-image-builder-* 2> /dev/null
+rm -rf "$(dirname "$(mktemp -u -t uc-image-builder-XXXX)")"/uc-image-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["DEBUG_LEVEL"]}" ] && BUILDER_CONFIG["DEBUG_LEVEL"]=1
 [ -n "${UC_IMAGE_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${UC_IMAGE_WORK_DIR}
 
 # boot assets candidate directories in gadget snap
 BOOT_ASSETS_CANDIDATES="blobs boot-assets assets"
-
-SNAP_REQUIRED_INTERFACES="home mount-observe network-observe ssh-public-keys"
 
 # print help
 print_help () {
@@ -162,7 +160,7 @@ normalize_version () {
 
 # provision macOS
 provision_macOS_system () {
-  if [ -n "$(uname -a | grep Darwin)" ]; then
+  if uname -a | grep -q "Darwin"; then
     ## building on macOS, check if dependencies are installed
 
     # first check brew cellars, required cellars: e2fsprogs, simg2img, squashfs, dosfstools
@@ -183,31 +181,31 @@ provision_macOS_system () {
     UC_BUILD_DEPENDENCIES["mtools"]="mcopy"
     UC_BUILD_DEPENDENCIES["wget"]="wget"
     UC_BUILD_DEPENDENCIES["yq"]="yq"
-    UC_BUILD_PYTHON_DEPENDENCIES["ssh-import-id"]="ssh-import-id"
 
     # handle build dependecies installed by brew
     for pckg in "${!UC_BUILD_DEPENDENCIES[@]}"
     do
-      if [ ! -f "$(which  ${UC_BUILD_DEPENDENCIES[${pckg}]})" ]; then
+      if [ ! -f "$(which  "${UC_BUILD_DEPENDENCIES[${pckg}]}")" ]; then
         echo -e "installing brew cellar ${pckg}"
-        brew install ${pckg}
+        brew install "${pckg}"
       fi
     done
 
     # check if we have snap client binary
-    if [ ! ${HOME}/bin/snap ]; then
+    if [ ! -e "${HOME}/bin/snap" ]; then
       echo "Downloadig snap client...."
-      mkdir -p ${HOME}/bin
-      wget https://people.canonical.com/~okubik/snap.macOS -o ${HOME}/bin/snap
-      chmod +x ${HOME}/bin/snap
+      mkdir -p "${HOME}/bin"
+      wget https://people.canonical.com/~okubik/snap.macOS -o "${HOME}/bin/snap"
+      chmod +x "${HOME}/bin/snap"
       echo "Downloaded version of snap client:"
       snap version
     fi
 
     # update script if there is never version
     local url="https://raw.githubusercontent.com/kubiko/uc-image/master/glue/bin/uc-image"
-    local latest_version=$(curl -s ${url} | grep SCRIPT_VERSION= | head -n1 | awk -F '=' '{print $2}')
-    if [ $(normalize_version ${SCRIPT_VERSION}) -ge $(normalize_version ${latest_version}) ]; then
+    local latest_version
+    latest_version=$(curl -s ${url} | grep SCRIPT_VERSION= | head -n1 | awk -F '=' '{print $2}')
+    if [ "$(normalize_version "${SCRIPT_VERSION}")" -ge "$(normalize_version "${latest_version}")" ]; then
       echo -e "Script version is up to date\n"
     else
       echo -e "!!! Script is outdated, download new one from ${url} !!!\n"
@@ -220,7 +218,7 @@ provision_macOS_system () {
 # check snaps interfaces are connected before progressing
 check_snap_environment () {
   # are we even running in snap confinement
-  if [ -z "$(env | grep SNAP_INSTANCE_NAME)" ]; then
+  if !  env | grep -q  "SNAP_INSTANCE_NAME"; then
     echo "Detected non snap environment execution (running unconfined)"
     return
   fi
@@ -246,9 +244,9 @@ print_debug () {
   [ "${BUILDER_CONFIG["DEBUG_LEVEL"]}" -ge "${level}" ] && echo -e "$@"
   # if work dir does not exist yet, log to tmp log file
   if [ -e "${BUILDER_CONFIG["TMP_LOG_FILE"]}" ]; then
-    echo -e -n "$@" >> ${BUILDER_CONFIG["TMP_LOG_FILE"]}
+    echo -e -n "$@" >> "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
   else
-    echo -e -n "$@" >> ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+    echo -e -n "$@" >> "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
   fi
 }
 
@@ -267,20 +265,20 @@ print_builder_config () {
 # prepare work directory
 prepare_work_directory () {
   # first clean previus tmp directories
-  rm -rf $(dirname $(mktemp -u -d -t uc-i-workdir-XXXXX))/uc-i-workdir-*
+  rm -rf "$(dirname "$(mktemp -u -d -t uc-i-workdir-XXXXX)")"/uc-i-workdir-*
   # if work directory is not defined, use tmp one
   if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
     # work dir not defined create tmp one
     BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-i-workdir-XXXX)
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}
+    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}"
     print_debug 2 "Creating temp work directory: ${BUILDER_CONFIG["WORK_DIR"]}"
   else
     # make sure dir exists
-    if [ -d ${BUILDER_CONFIG["WORK_DIR"]} ]; then
+    if [ -d "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
         print_debug 2 "Cleaning old build directory [${BUILDER_CONFIG["WORK_DIR"]}]"
-        rm -rf ${BUILDER_CONFIG["WORK_DIR"]}
+        rm -rf "${BUILDER_CONFIG["WORK_DIR"]}"
     fi
-    mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}
+    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}"
   fi
 }
 
@@ -291,13 +289,13 @@ parse_model_asseertion() {
 
   # we can have true uc20 and we can have uc20 with disk and boot as uc16/18
   # grade keyword is only defined for tru uc20
-  BUILDER_CONFIG["UC_VERSION"]="$(sed -n 's/^base: core\(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
+  BUILDER_CONFIG["UC_VERSION"]="$(sed -n 's/^base: core\(.*\)/\1/p' "${BUILDER_CONFIG["MODEL_ASSERTION"]}")"
   if [ "${BUILDER_CONFIG["UC_VERSION"]}" -lt "20" ]; then
     print_debug 1 "\nUbuntu Core 16/18 image builds are no more supported by this tool."
     exit
   fi
   print_debug 2 "Determined Ubuntu Core version: ${BUILDER_CONFIG["UC_VERSION"]}"
-  BUILDER_CONFIG["MODEL"]="$(sed -n 's/^model: \(.*\)/\1/p' ${BUILDER_CONFIG["MODEL_ASSERTION"]})"
+  BUILDER_CONFIG["MODEL"]="$(sed -n 's/^model: \(.*\)/\1/p' "${BUILDER_CONFIG["MODEL_ASSERTION"]}")"
   print_debug 2 "Determined model name: ${BUILDER_CONFIG["MODEL"]}"
 }
 
@@ -307,30 +305,30 @@ determine_bootloader () {
   # determine boot assets dir
   for ba in ${BOOT_ASSETS_CANDIDATES}
   do
-    if [ -d ${BUILDER_CONFIG["GADGET_DIR"]}/${ba} ]; then
+    if [ -d "${BUILDER_CONFIG["GADGET_DIR"]}/${ba}" ]; then
       BUILDER_CONFIG["BOOT_ASSETS"]="${BUILDER_CONFIG["GADGET_DIR"]}/${ba}"
       break
     fi
   done
 
   print_debug 5 "bootloader: ${YQ} eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
-  BUILDER_CONFIG["BOOTLOADER"]="$("${YQ}" eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]})"
-  print_debug 5 "BUILDER_CONFIG["BOOTLOADER"]=${BUILDER_CONFIG["BOOTLOADER"]}"
+  BUILDER_CONFIG["BOOTLOADER"]="$("${YQ}" eval '.volumes.[] | select(.bootloader) | .bootloader' "${BUILDER_CONFIG["GADGET_YAML"]}")"
+  print_debug 5 "BUILDER_CONFIG[\"BOOTLOADER\"]=${BUILDER_CONFIG["BOOTLOADER"]}"
   BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
 
-  print_debug 3 "BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["IMAGE_ROOT"]}"
+  print_debug 3 "BUILDER_CONFIG[\"IMAGE_ROOT\"]=${BUILDER_CONFIG["IMAGE_ROOT"]}"
   # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
     # check if we have defined dtb
-    BUILDER_CONFIG["DTB"]=$("${YQ}" eval '. | select(.device-tree) | .device-tree' ${BUILDER_CONFIG["GADGET_YAML"]})
+    BUILDER_CONFIG["DTB"]=$("${YQ}" eval '. | select(.device-tree) | .device-tree' "${BUILDER_CONFIG["GADGET_YAML"]}")
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     ## lk
     BUILDER_CONFIG["BOOTLOADER"]="lk"
-    mv ${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/lk ${BUILDER_CONFIG["WORK_DIR"]}/lk
+    mv "${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/lk" "${BUILDER_CONFIG["WORK_DIR"]}/lk"
     # check if this is amboot special case
-    if [ -d ${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot ]; then
+    if [ -d "${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot" ]; then
       # set some configuratoon for amboot case
       BUILDER_CONFIG["BUILD_RAW"]="true"
       BUILDER_CONFIG["AMBOOT"]="true"
@@ -351,20 +349,20 @@ determine_bootloader () {
 validate_file () {
   local file=${1}
   if [ -n "${file}" ]; then
-    if [ ! -e ${file} ]; then
+    if [ ! -e "${file}" ]; then
       # only use when we actually have search path
       if [ -n "${BUILDER_CONFIG["SEARCH_PATH"]}" ]; then
         IFS=":"
         for p in ${BUILDER_CONFIG["SEARCH_PATH"]}
         do
-          if [ -e ${p}/${file} ]; then
-            echo $(${READLINK} -f ${p}/${file})
+          if [ -e "${p}/${file}" ]; then
+            "${READLINK}" -f "${p}/${file}"
             return
           fi
         done
       fi
     else
-      echo $(${READLINK} -f ${file})
+      "${READLINK}" -f "${file}"
     fi
   fi
 }
@@ -376,7 +374,7 @@ validate_snap () {
   local s="${1}"
   if [ "${s: -5}" = ".snap" ]; then
     # check if local snap file exists
-    echo "$(validate_file ${s})"
+    validate_file "${s}"
   else
     # store snap
     echo "${s}"
@@ -390,12 +388,12 @@ normalise_size_to_kb () {
   local size=${1}
   case $size in
     (0)  size="0" ;;
-    (*G | *g) size=$(expr $(echo $size | sed -e 's/G//g' -e 's/g//g') \* 1024 \* 1024) ;;
-    (*M | *m) size=$(expr $(echo $size | sed -e 's/M//g' -e 's/m//g') \* 1024) ;;
-    (*K | *k) size=$(echo $size | sed -e 's/K//g' -e 's/k//g') ;;
-    (*) size=$(expr $size / 1024) ;;
+    (*G | *g) size=$(("$(echo "${size}" | sed -e 's/G//g' -e 's/g//g')" * 1024 * 1024)) ;;
+    (*M | *m) size=$(("$(echo "${size}" | sed -e 's/M//g' -e 's/m//g')" * 1024)) ;;
+    (*K | *k) size=$(echo "${size}" | sed -e 's/K//g' -e 's/k//g') ;;
+    (*) size=$(("${size}" / 1024)) ;;
   esac
-  echo ${size}
+  echo "${size}"
 }
 
 # seed passed assertion as auto import assertion
@@ -405,8 +403,9 @@ seed_auto_import_assertion () {
   print_debug 5 "seed_auto_import_assertion(${BUILDER_CONFIG["ASSERTION_IMPORT"]})"
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
-    local system=$(realpath ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*)
-    cp ${BUILDER_CONFIG["ASSERTION_IMPORT"]} ${system}/auto-import.assert
+    local system
+    system=$(realpath "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*)
+    cp "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" "${system}/auto-import.assert"
   fi
 }
 
@@ -424,7 +423,7 @@ update_snapd_recovery_mode () {
       fw_setenv --config "${fw_config}" "snapd_recovery_mode" "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
     elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" == "lk" ]; then
       print_debug 4 "lk bootloader: lk-boot-env -u ${BUILDER_CONFIG["WORK_DIR"]}/lk/snaprecoverysel.bin --revovery-mode \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
-      lk-boot-env -u ${BUILDER_CONFIG["WORK_DIR"]}/lk/snaprecoverysel.bin --revovery-mode "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
+      lk-boot-env -u "${BUILDER_CONFIG["WORK_DIR"]}/lk/snaprecoverysel.bin" --revovery-mode "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
     else
       print_debug 1 "\n !! Unsupported bootloader to set snapd_recovery_mode"
       exit 1
@@ -443,8 +442,8 @@ disk_info_contents () {
   print_debug 5 "disk_info_contents(${BUILDER_CONFIG["DISK_INFO_CONTENTS"]})"
   if [ -n "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" ]; then
     print_debug 1 "\nUsing passed disk info contents: [${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}]"
-    mkdir -p ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk
-    cp ${BUILDER_CONFIG["DISK_INFO_CONTENTS"]} ${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info
+    mkdir -p "${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk"
+    cp "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" "${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info"
   fi
 }
 
@@ -467,14 +466,14 @@ create_disk_image() {
   if [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
     print_debug 1 "\nCreating tarball for ${volume_label}"
     print_debug 2 "tar -cf ${volume_image}.tar ${volume_source}"
-    ${BUILDER_CONFIG["FAKEROOT"]} tar -cf ${volume_image}.tar ${volume_source}
+    ${BUILDER_CONFIG["FAKEROOT"]} tar -cf "${volume_image}.tar" "${volume_source}"
     # update target file name
     target_image="${volume_image}.tar"
   elif [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; then
     print_debug 1 "\nSkipping file system image step for ${volume_label}, as it's not required by the build type."
     target_image="${volume_source}"
   else
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t "${fs_type}" -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t ${fs_type} -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
     ${BUILDER_CONFIG["FAKEROOT"]} mke2fs \
       -O \
       -metadata_csum \
@@ -482,10 +481,10 @@ create_disk_image() {
       -E root_owner=0:0 \
       -O uninit_bg \
       -t "${fs_type}" \
-      -L ${volume_label} \
-      -d ${volume_source} ${volume_image}.raw \
-      ${volume_size} 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
-    if [ ! -f ${volume_image}.raw ]; then
+      -L "${volume_label}" \
+      -d "${volume_source}" "${volume_image}.raw" \
+      "${volume_size}" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+    if [ ! -f "${volume_image}.raw" ]; then
       print_debug 1 "\nVolume creation for ${volume_label} partiton failed, bailing out!!!"
       exit 0
     fi
@@ -493,7 +492,7 @@ create_disk_image() {
     if [ "${BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]}" = "true" ]; then
       print_debug 1 "\nCompressing image for ${volume_label}"
       print_debug 2 "xz -c ${volume_image}.raw  > ${volume_image}.img.xz"
-      xz -c ${volume_image}.raw  > ${volume_image}.img.xz
+      xz -c "${volume_image}.raw"  > "${volume_image}.img.xz"
       # update target file name
       target_image="${volume_image}.img.xz"
     elif [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
@@ -503,8 +502,8 @@ create_disk_image() {
       print_debug 1 "\nCreate sparse image for ${volume_label}"
       print_debug 2 "img2simg ${volume_image}.raw ${volume_image}.img"
       img2simg \
-        ${volume_image}.raw \
-        ${volume_image}.img 2>&1 | tee -a ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+        "${volume_image}.raw" \
+        "${volume_image}.img" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
     fi
   fi
   if [ ! -f "${target_image}" ]; then
@@ -519,16 +518,18 @@ create_ubuntu_seed_partition_image () {
   print_debug 1 "\nCreating ubuntu-seed partition image"
 
   # calculate ubuntu-seed part size
-  local seed_size_human=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' ${BUILDER_CONFIG["GADGET_YAML"]})
-  local SEED_SIZE="$(normalise_size_to_kb ${seed_size_human})k"
+  local seed_size_human
+  seed_size_human=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .size' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  local SEED_SIZE
+  SEED_SIZE="$(normalise_size_to_kb "${seed_size_human}")k"
   local fs_type
-  fs_type=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .filesystem' ${BUILDER_CONFIG["GADGET_YAML"]})
+  fs_type=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .filesystem' "${BUILDER_CONFIG["GADGET_YAML"]}")
   create_disk_image \
-      ${BUILDER_CONFIG["IMAGE_ROOT"]} \
-      ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed \
+      "${BUILDER_CONFIG["IMAGE_ROOT"]}" \
+      "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed" \
       "${fs_type}" \
       "ubuntu-seed" \
-      ${SEED_SIZE}
+      "${SEED_SIZE}"
 }
 
 create_non_ubuntu_partions_images () {
@@ -537,14 +538,14 @@ create_non_ubuntu_partions_images () {
   local size
   local fs_type
   local converted_size
-  rm -rf ${BUILDER_CONFIG["WORK_DIR"]}/partitions
-  partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and (.name != "ubuntu-*")) | .name' ${BUILDER_CONFIG["GADGET_YAML"]})
+  rm -rf "${BUILDER_CONFIG["WORK_DIR"]}/partitions"
+  partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and (.name != "ubuntu-*")) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
   for p_name in ${partitions}
   do
     print_debug 2 "\nCreating part image for partition: ${p_name}"
     size=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .size' "${BUILDER_CONFIG["GADGET_YAML"]}")
     fs_type=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .filesystem' "${BUILDER_CONFIG["GADGET_YAML"]}")
-    converted_size="$(normalise_size_to_kb ${size})k"
+    converted_size="$(normalise_size_to_kb "${size}")k"
     mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}"
     # TODO: support preseeded content from gadget snap
     create_disk_image \
@@ -560,51 +561,53 @@ copy_release_files () {
   # copy created disk images to the output directory
   for rf in writable seed ubuntu-seed
   do
-    if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img ]; then
-      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img \
-         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    if [ -e "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img" ]; then
+      mv "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img" \
+         "${BUILDER_CONFIG["OUTPUT_DIR"]}"/
     # check for .imx.xz
-    elif [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz ]; then
-      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz \
-         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    elif [ -e "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz" ]; then
+      mv "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.img.xz" \
+         "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     # check also for .tar
-    elif  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar ]; then
-      mv ${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar \
-         ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    elif  [ -e "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar" ]; then
+      mv "${BUILDER_CONFIG["WORK_DIR"]}/${rf}.tar" \
+         "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     fi
   done
 
   # if building factory-reset image without encryption context, use ubuntu-seed dir
   if [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; then
     print_debug 2 "\nUsing image-root dir as output"
-    mv ${BUILDER_CONFIG["IMAGE_ROOT"]} \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed
+    mv "${BUILDER_CONFIG["IMAGE_ROOT"]}" \
+       "${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
     BUILDER_CONFIG["IMAGE_ROOT"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
   fi
 
   # copy gadget boot assets files if making normal release
-  for f in $("${YQ}" eval '.volumes.[].structure.[] | .content.[].image' ${BUILDER_CONFIG["GADGET_YAML"]} | uniq)
+  for f in $("${YQ}" eval '.volumes.[].structure.[] | .content.[].image' "${BUILDER_CONFIG["GADGET_YAML"]}" | uniq)
   do
-    if [ -e ${BUILDER_CONFIG["GADGET_DIR"]}/${f} ]; then
-      cp ${BUILDER_CONFIG["GADGET_DIR"]}/${f} \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    if [ -e "${BUILDER_CONFIG["GADGET_DIR"]}/${f}" ]; then
+      cp "${BUILDER_CONFIG["GADGET_DIR"]}/${f}" \
+         "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     fi
   done
 
   # copy over special files e.g. gpt_*, uc.lst. Assume use of wild cards
   for sf in ${BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]}
   do
-    if compgen -G ${BUILDER_CONFIG["BOOT_ASSETS"]}/${sf} > /dev/null; then
+    # shellcheck disable=SC2086 # SC2086 is irrelevant, 'sf' can contain wild cards
+    if compgen -G "${BUILDER_CONFIG["BOOT_ASSETS"]}"/${sf} > /dev/null; then
+      # shellcheck disable=SC2086 # SC2086 is irrelevant, 'sf' can contain wild cards
       cp --dereference -r \
-        ${BUILDER_CONFIG["BOOT_ASSETS"]}/${sf} \
-        ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+        "${BUILDER_CONFIG["BOOT_ASSETS"]}"/${sf} \
+        "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     fi
   done
 
   # if booloader is lk, copy over boot image
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
-       ${BUILDER_CONFIG["OUTPUT_DIR"]}/
+    cp "${BUILDER_CONFIG["WORK_DIR"]}"/lk/* \
+       "${BUILDER_CONFIG["OUTPUT_DIR"]}"
   fi
 
   # copy(move) additional partition images if any
@@ -620,103 +623,106 @@ copy_release_files () {
 
 run_amba_image_build () {
   # gather files for amba image build first
-  cp -r ${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot \
-        ${BUILDER_CONFIG["WORK_DIR"]}/amba-build
-  mkdir -p ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images
+  cp -r "${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot" \
+        "${BUILDER_CONFIG["WORK_DIR"]}/amba-build"
+  mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images"
   # copy images from gadget assets, ignore dir warning
-  cp ${BUILDER_CONFIG["BOOT_ASSETS"]}/* \
-     ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images 2>/dev/null
+  cp "${BUILDER_CONFIG["BOOT_ASSETS"]}"/* \
+     "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images" 2>/dev/null
 
-  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw ] \
-    && mv ${BUILDER_CONFIG["WORK_DIR"]}/writable.raw \
-          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin
-  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw ] \
-    && mv ${BUILDER_CONFIG["WORK_DIR"]}/seed.raw \
-          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin
+  [ -e "${BUILDER_CONFIG["WORK_DIR"]}/writable.raw" ] \
+    && mv "${BUILDER_CONFIG["WORK_DIR"]}/writable.raw" \
+          "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin"
+  [ -e "${BUILDER_CONFIG["WORK_DIR"]}/seed.raw" ] \
+    && mv "${BUILDER_CONFIG["WORK_DIR"]}/seed.raw" \
+          "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/lnx.bin"
 
-  [ -e ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw ] \
-    && mv ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw \
-          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/ubuntu-seed.img
+  [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw" ] \
+    && mv "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw" \
+          "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/ubuntu-seed.img"
 
   # add gpt image and rename it
-  [ -e ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin ] \
-    && cp ${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin \
-          ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/gpt_both.bin
+  [ -e "${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin" ] \
+    && cp "${BUILDER_CONFIG["BOOT_ASSETS"]}/gpt_both0.bin" \
+          "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/gpt_both.bin"
 
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
-    cp ${BUILDER_CONFIG["WORK_DIR"]}/lk/* \
-       ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images/
+    cp "${BUILDER_CONFIG["WORK_DIR"]}"/lk/* \
+       "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images"
   fi
 
   # run amba image builder script, we need to run it in dir
   # as it has some hardcoded paths
-  pushd ${BUILDER_CONFIG["WORK_DIR"]}/amba-build
+  pushd "${BUILDER_CONFIG["WORK_DIR"]}/amba-build" || exit
   # we have two types of amba firmware, legacy and flexible
   # determine which one we are building based on
   if [ -e .uc-image-config ]; then
     print_debug 2 "build-amba-images ${BUILDER_CONFIG["WORK_DIR"]}/amba-build ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images ${BUILDER_CONFIG["OUTPUT_DIR"]}"
     build-amba-images \
-      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
-      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
-      ${BUILDER_CONFIG["OUTPUT_DIR"]}
+      "${BUILDER_CONFIG["WORK_DIR"]}/amba-build" \
+      "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images" \
+      "${BUILDER_CONFIG["OUTPUT_DIR"]}"
   elif [ -e .uc-image-flexible-config ]; then
     print_debug 2 "build-amba-images-flexible ${BUILDER_CONFIG["WORK_DIR"]}/amba-build ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images ${BUILDER_CONFIG["OUTPUT_DIR"]}"
     build-amba-images-flexible \
-      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build \
-      ${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images \
-      ${BUILDER_CONFIG["OUTPUT_DIR"]}
+      "${BUILDER_CONFIG["WORK_DIR"]}/amba-build" \
+      "${BUILDER_CONFIG["WORK_DIR"]}/amba-build/images" \
+      "${BUILDER_CONFIG["OUTPUT_DIR"]}"
   else
     print_debug 1 "\nMissing amba uc-image config!!"
     exit 1
   fi
-  popd
+  popd || exit
 }
 
 # generate image manifest
 generate_manifest () {
-  local IMAGE_MANIFEST="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
-  echo -e "### Ubuntu Core image build ###" > ${IMAGE_MANIFEST}
-  echo -e "$(date)" >> ${IMAGE_MANIFEST}
-  echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}" >> ${IMAGE_MANIFEST}
-  # add uc-image revision info
-  if [ -z "${SNAP_REVISION}" ]; then
-    local SNAP_REVISION="$(snap list uc-image | tail -1 | awk '{print $3}')"
+  local image_manifest="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
+  {
+    echo -e "### Ubuntu Core image build ###"
+    echo -e "$(date)"
+    echo -e "uc-image ${BUILDER_CONFIG["ARGS"]}"
+    echo -e "\n### uc-image revision ####\n  revision: ${SNAP_REVISION}\tversion: ${SCRIPT_VERSION}"
+    echo -e "\n### Snap options ###"
+  } >> "${image_manifest}"
+
+  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/options.yaml 1> /dev/null 2>&1; then
+      cat "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/options.yaml >> "${image_manifest}"
   fi
-  echo -e "\n### uc-image revision ####\n  revision: ${SNAP_REVISION}\tversion: ${SCRIPT_VERSION}" >> ${IMAGE_MANIFEST}
-  echo -e "\n### Snap options ###" >> ${IMAGE_MANIFEST}
-  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml 1> /dev/null 2>&1; then
-    cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/options.yaml \
-        >> ${IMAGE_MANIFEST}
+
+
+  {
+    echo -e "\n### Snap revissions ###" >> "${image_manifest}"
+    grep -A7 "type: snap-revision" "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/assertions/snaps
+    echo -e "\n### Model assertion ###" >> "${image_manifest}"
+    cat "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/model
+    echo -e "\n### snap checksums ###"
+  } >> "${image_manifest}"
+  
+  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
   fi
-  echo -e "\n### Snap revissions ###" >> ${IMAGE_MANIFEST}
-  grep -A7 "type: snap-revision" ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/assertions/snaps \
-    >> ${IMAGE_MANIFEST}
-  echo -e "\n### Model assertion ###" >> ${IMAGE_MANIFEST}
-  cat ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/model >> ${IMAGE_MANIFEST}
-  echo -e "\n### snap checksums ###" >> ${IMAGE_MANIFEST}
-  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
-    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/systems/*/snaps/*.snap \
-      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
-  fi
-  if ls ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap 1> /dev/null 2>&1; then
-    sha256sum ${BUILDER_CONFIG["IMAGE_ROOT"]}/snaps/*.snap \
-      | awk -F" |/" '{print $1, $NF}' >> ${IMAGE_MANIFEST}
+  
+  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap \
+      | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
   fi
 }
 
 run_snap_prepare_image() {
   # set default exit code as fail before running snap prepare-image
-  echo 2 > ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result
-  eval "$@"
+  echo 2 > "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result"
+  eval "${*}"
   retValue=$?
-  echo ${retValue} > ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result
+  echo ${retValue} > "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result"
 }
 
 # make sure system is ready before we even start parsing input
 provision_macOS_system
 
 # store invoked command
-BUILDER_CONFIG["ARGS"]="$@"
+BUILDER_CONFIG["ARGS"]="${*}"
 # parse passed parameters
 while [ "$1" != "" ]; do
   case $1 in
@@ -725,16 +731,16 @@ while [ "$1" != "" ]; do
       shift
       ;;
     --snap=*)
-      EX_SNAP=$(echo ${1} | awk -F= '{print $2}')
-      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${EX_SNAP})"
+      EX_SNAP=$(echo "${1}" | awk -F= '{print $2}')
+      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap "${EX_SNAP}")"
       ;;
     --snap)
-      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap ${2})"
+      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap "${2}")"
       shift
       ;;
     --revisions)
-      f=$(validate_file ${2})
-      if [ -n "${f}" ] && [ -f ${f} ]; then
+      f=$(validate_file "${2}")
+      if [ -n "${f}" ] && [ -f "${f}" ]; then
         BUILDER_CONFIG["REVISIONS"]="--revisions=${f}"
       else
         print_debug 0 "wrong 'revisions' file was passed [ ${2} ]"
@@ -754,7 +760,7 @@ while [ "$1" != "" ]; do
       shift
       ;;
     -O | --output-dir)
-      BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f ${2})"
+      BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f "${2}")"
       if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
         print_debug 0 "Passed output directory cannot be created!!"
         exit
@@ -762,12 +768,12 @@ while [ "$1" != "" ]; do
       shift
       ;;
     -w | --workdir)
-      BUILDER_CONFIG["WORK_DIR"]="$(${READLINK} -f ${2})"
+      BUILDER_CONFIG["WORK_DIR"]="$(${READLINK} -f "${2}")"
       shift
       ;;
     --auto-import-assertion)
-      f=$(validate_file ${2})
-      if [ -n "${f}" ] && [ -f ${f} ]; then
+      f=$(validate_file "${2}")
+      if [ -n "${f}" ] && [ -f "${f}" ]; then
         BUILDER_CONFIG["ASSERTION_IMPORT"]="${f}"
       else
         print_debug 0 "wrong assertion file to import was passed [ ${2} ]"
@@ -776,8 +782,8 @@ while [ "$1" != "" ]; do
       shift
       ;;
     --disk-info)
-      f=$(validate_file ${2})
-      if [ -n "${f}" ] && [ -f ${f} ]; then
+      f=$(validate_file "${2}")
+      if [ -n "${f}" ] && [ -f "${f}" ]; then
         BUILDER_CONFIG["DISK_INFO_CONTENTS"]="${f}"
       else
         print_debug 0 "wrong disk info file was passed [ ${2} ]"
@@ -824,7 +830,7 @@ while [ "$1" != "" ]; do
       ;;
     *)
       # check if this is model assertion
-      ma=$(validate_file ${1})
+      ma=$(validate_file "${1}")
       if [ -n "${ma}" ]; then
         BUILDER_CONFIG["MODEL_ASSERTION"]=${ma}
       else
@@ -841,6 +847,7 @@ if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ] && [ -z "${BUILDER_CONFIG["S
   echo -e "\nMissing \"--set-to-factory-reset\" while using \"--ubuntu-seed-device-dir\""
   exit
 fi
+
 # if we are building factory-reset image without ubuntu-seed-device overlay, default to directory build
 if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ] && [ -z "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ] \
    && [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" != "true" ]; then
@@ -853,12 +860,13 @@ if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
   BUILDER_CONFIG["FAKEROOT"]=""
 fi
 
-if [ -z ${BUILDER_CONFIG["MODEL_ASSERTION"]} ]; then
+if [ -z "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
   print_debug 0 "model_assertion is not set"
   exit
 fi
+
 parse_model_asseertion
-[ -n "${UC_IMAGE_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f uci-${BUILDER_CONFIG["MODEL"]})
+[ -n "${UC_IMAGE_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uci-${BUILDER_CONFIG["MODEL"]}")
 
 # check we have all the permissions
 check_snap_environment
@@ -874,19 +882,20 @@ BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${
 # run snap prepare image with all known parameters
 image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
 print_debug 1 "Running: ${image_build_command}"
-run_snap_prepare_image ${image_build_command} 2>&1 | tee -a ${BUILDER_CONFIG["TMP_LOG_FILE"]}
-retVal=$(cat ${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result)
-if [ $retVal -ne 0 ]; then
+run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
+retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result")
+if [ "${retVal}" -ne 0 ]; then
   print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
   exit
 fi
+
 print_debug 2 "snap prepare-image completed with exit code (${retVal})"
 
 BUILDER_CONFIG["GADGET_DIR"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget"
 BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
 
 # merge logs
-mv ${BUILDER_CONFIG["TMP_LOG_FILE"]} ${BUILDER_CONFIG["WORK_DIR"]}/builder.log
+mv "${BUILDER_CONFIG["TMP_LOG_FILE"]}" "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
 # determine bootloader
 determine_bootloader
 
@@ -901,11 +910,12 @@ seed_auto_import_assertion
 update_snapd_recovery_mode
 
 # prepare output directory
-if [ -d ${BUILDER_CONFIG["OUTPUT_DIR"]} ]; then
+if [ -d "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
     print_debug 2 "Cleaning output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}]"
-    rm -rf ${BUILDER_CONFIG["OUTPUT_DIR"]}
+    rm -rf "${BUILDER_CONFIG["OUTPUT_DIR"]}"
 fi
-mkdir -p ${BUILDER_CONFIG["OUTPUT_DIR"]}
+
+mkdir -p "${BUILDER_CONFIG["OUTPUT_DIR"]}"
 
 # create ubuntu-seed image
 # do not create ubuntu-seed image if we are building directory mode
@@ -930,8 +940,8 @@ fi
 
 # create/copy image manifest
 generate_manifest
-if [ -e ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions ]; then
-  cp ${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions ${BUILDER_CONFIG["OUTPUT_DIR"]}
+if [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" ]; then
+  cp "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" "${BUILDER_CONFIG["OUTPUT_DIR"]}"
 fi
 
 print_debug 0 "\nOutput available in: '${BUILDER_CONFIG["OUTPUT_DIR"]}'"
