@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.2.0
+SCRIPT_VERSION=7.3.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -37,6 +37,7 @@ YQ="${SNAP}/usr/bin/yq"
 BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
 BUILDER_CONFIG["DEBUG_LEVEL"]="${UC_IMAGE_DEBUG_LEVEL}"
 BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
+BUILDER_CONFIG["VALIDATION"]="ignore"
 
 # special files to be copied from gadget snap if any exists
 # they are typically not mapped to any partition, so won't be picked based on
@@ -83,6 +84,7 @@ print_help () {
   echo "                           example: -c edge"
   echo "  --preseed                Pressed the image."
   echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
+  echo "  --validation             Control of the validation sets, choose 'ignore' or 'enforce', default: '${BUILDER_CONFIG["VALIDATION"]}'"
   echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
   echo "         (--sysfs-overlay) This required when building images with specific hw interfaces"
   echo "  -d, --debug              print debug"
@@ -759,6 +761,10 @@ while [ "$1" != "" ]; do
       BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay ${2}"
       shift
       ;;
+    --validation)
+      BUILDER_CONFIG["VALIDATION"]="${2}"
+      shift
+    ;;
     -O | --output-dir)
       BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f "${2}")"
       if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
@@ -880,7 +886,7 @@ print_builder_config
 BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions"
 
 # run snap prepare image with all known parameters
-image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
 print_debug 1 "Running: ${image_build_command}"
 run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
 retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result")
