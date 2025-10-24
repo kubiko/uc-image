@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.3.1
+SCRIPT_VERSION=7.4.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -36,7 +36,6 @@ YQ="${SNAP}/usr/bin/yq"
 # fill in default values
 BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
 BUILDER_CONFIG["DEBUG_LEVEL"]="${UC_IMAGE_DEBUG_LEVEL}"
-BUILDER_CONFIG["SEARCH_PATH"]="${UC_IMAGE_SEARCH_PATH}"
 BUILDER_CONFIG["VALIDATION"]="ignore"
 
 # special files to be copied from gadget snap if any exists
@@ -143,10 +142,6 @@ print_help () {
   echo ""
   echo "Builder supports default settings passed through environment variables"
   echo "Supported env variables:"
-  echo "    UC_IMAGE_SEARCH_PATH:  Colon separated search paths to use to search for passed file parameters"
-  echo "                           if not provided with absolute or relative path."
-  echo "                           First successful find is used."
-  echo "                           This search path is used for model assertions, snaps, network configs, auto-import-assertion"
   echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
   echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
   echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
@@ -158,63 +153,6 @@ print_help () {
 # normalize version
 normalize_version () {
    echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }'
-}
-
-# provision macOS
-provision_macOS_system () {
-  if uname -a | grep -q "Darwin"; then
-    ## building on macOS, check if dependencies are installed
-
-    # first check brew cellars, required cellars: e2fsprogs, simg2img, squashfs, dosfstools
-    if [ ! -f "$(which brew)" ]; then
-      echo "This system has no brew installed. There is no way to install dependencies required for image building"
-      echo "see https://brew.sh"
-      exit 0
-    fi
-    echo -e "\nChecking system dependencies"
-    # brew list is very slow, so check for files instead
-    declare -A UC_BUILD_DEPENDENCIES
-    UC_BUILD_DEPENDENCIES["coreutils"]="realpath"
-    UC_BUILD_DEPENDENCIES["e2fsprogs"]="mkfs.ext4"
-    UC_BUILD_DEPENDENCIES["simg2img"]="img2simg"
-    UC_BUILD_DEPENDENCIES["squashfs"]="mksquashfs"
-    UC_BUILD_DEPENDENCIES["dosfstools"]="mkfs.vfat"
-    # UC_BUILD_DEPENDENCIES["fakeroot"]="fakeroot" not yes supported by macOS 12.x
-    UC_BUILD_DEPENDENCIES["mtools"]="mcopy"
-    UC_BUILD_DEPENDENCIES["wget"]="wget"
-    UC_BUILD_DEPENDENCIES["yq"]="yq"
-
-    # handle build dependecies installed by brew
-    for pckg in "${!UC_BUILD_DEPENDENCIES[@]}"
-    do
-      if [ ! -f "$(which  "${UC_BUILD_DEPENDENCIES[${pckg}]}")" ]; then
-        echo -e "installing brew cellar ${pckg}"
-        brew install "${pckg}"
-      fi
-    done
-
-    # check if we have snap client binary
-    if [ ! -e "${HOME}/bin/snap" ]; then
-      echo "Downloadig snap client...."
-      mkdir -p "${HOME}/bin"
-      wget https://people.canonical.com/~okubik/snap.macOS -o "${HOME}/bin/snap"
-      chmod +x "${HOME}/bin/snap"
-      echo "Downloaded version of snap client:"
-      snap version
-    fi
-
-    # update script if there is never version
-    local url="https://raw.githubusercontent.com/kubiko/uc-image/master/glue/bin/uc-image"
-    local latest_version
-    latest_version=$(curl -s ${url} | grep SCRIPT_VERSION= | head -n1 | awk -F '=' '{print $2}')
-    if [ "$(normalize_version "${SCRIPT_VERSION}")" -ge "$(normalize_version "${latest_version}")" ]; then
-      echo -e "Script version is up to date\n"
-    else
-      echo -e "!!! Script is outdated, download new one from ${url} !!!\n"
-      exit 0
-    fi
-    YQ="yq"
-  fi
 }
 
 # check snaps interfaces are connected before progressing
@@ -345,25 +283,12 @@ determine_bootloader () {
 
 # validate passed parameter is file
 # if passed string is not file with relative/absolute path
-# BUILDER_CONFIG["SEARCH_PATH"] variable is used as search path to look for the file
 # first hit is used
 # function returns absolute path to the file if file is validated or none
 validate_file () {
   local file=${1}
   if [ -n "${file}" ]; then
-    if [ ! -e "${file}" ]; then
-      # only use when we actually have search path
-      if [ -n "${BUILDER_CONFIG["SEARCH_PATH"]}" ]; then
-        IFS=":"
-        for p in ${BUILDER_CONFIG["SEARCH_PATH"]}
-        do
-          if [ -e "${p}/${file}" ]; then
-            "${READLINK}" -f "${p}/${file}"
-            return
-          fi
-        done
-      fi
-    else
+    if [ -e "${file}" ]; then
       "${READLINK}" -f "${file}"
     fi
   fi
@@ -700,12 +625,12 @@ generate_manifest () {
     cat "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/model
     echo -e "\n### snap checksums ###"
   } >> "${image_manifest}"
-  
+
   if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
     sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap \
       | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
   fi
-  
+
   if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap 1> /dev/null 2>&1; then
     sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap \
       | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
@@ -714,14 +639,11 @@ generate_manifest () {
 
 run_snap_prepare_image() {
   # set default exit code as fail before running snap prepare-image
-  echo 2 > "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result"
+  echo 2 > "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
   eval "${*}"
   retValue=$?
-  echo ${retValue} > "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result"
+  echo ${retValue} > "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
 }
-
-# make sure system is ready before we even start parsing input
-provision_macOS_system
 
 # store invoked command
 BUILDER_CONFIG["ARGS"]="${*}"
@@ -889,7 +811,8 @@ BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${
 image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
 print_debug 1 "Running: ${image_build_command}"
 run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
-retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}/snap_prepare_result")
+retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result")
+rm -rf "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
 if [ "${retVal}" -ne 0 ]; then
   print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
   exit
