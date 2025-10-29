@@ -16,25 +16,18 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.4.1
+SCRIPT_VERSION=7.4.2
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
 
-if uname -a | grep -q "Darwin"; then
-  READLINK="greadlink"
-  # do not use fakeroot by default
-  BUILDER_CONFIG["FAKEROOT"]=""
-else
-  READLINK="readlink"
-  # use fakeroot by default
-  BUILDER_CONFIG["FAKEROOT"]="fakeroot"
-fi
+READLINK="readlink"
+# use fakeroot by default
+BUILDER_CONFIG["FAKEROOT"]="fakeroot"
 
 YQ="${SNAP}/usr/bin/yq"
 
 # fill in default values
-BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f uc-i-build)"
 BUILDER_CONFIG["DEBUG_LEVEL"]="${UC_IMAGE_DEBUG_LEVEL}"
 BUILDER_CONFIG["VALIDATION"]="ignore"
 
@@ -52,7 +45,6 @@ BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flash
 rm -rf "$(dirname "$(mktemp -u -t uc-image-builder-XXXX)")"/uc-image-builder-* 2> /dev/null
 BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
 [ -z "${BUILDER_CONFIG["DEBUG_LEVEL"]}" ] && BUILDER_CONFIG["DEBUG_LEVEL"]=1
-[ -n "${UC_IMAGE_WORK_DIR}" ] && BUILDER_CONFIG["WORK_DIR"]=${UC_IMAGE_WORK_DIR}
 
 # boot assets candidate directories in gadget snap
 BOOT_ASSETS_CANDIDATES="blobs boot-assets assets"
@@ -144,10 +136,6 @@ print_help () {
   echo "Supported env variables:"
   echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
   echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
-  echo "    UC_IMAGE_WORK_DIR:     Default work directory to be used"
-  echo "                           If not defined or passed as param, tmp directory is created"
-  echo "    UC_IMAGE_OUTPUT_DIR:   Default output directory"
-  echo "                           If not defined or passed as param, 'uci-<model name>' directory will be created in current directory"
 }
 
 # normalize version
@@ -664,7 +652,7 @@ while [ "$1" != "" ]; do
       ;;
     --revisions)
       f=$(validate_file "${2}")
-      if [ -n "${f}" ] && [ -f "${f}" ]; then
+      if [ -n "${f}" ]; then
         BUILDER_CONFIG["REVISIONS"]="--revisions=${f}"
       else
         print_debug 0 "wrong 'revisions' file was passed [ ${2} ]"
@@ -701,7 +689,7 @@ while [ "$1" != "" ]; do
       ;;
     --auto-import-assertion)
       f=$(validate_file "${2}")
-      if [ -n "${f}" ] && [ -f "${f}" ]; then
+      if [ -n "${f}" ]; then
         BUILDER_CONFIG["ASSERTION_IMPORT"]="${f}"
       else
         print_debug 0 "wrong assertion file to import was passed [ ${2} ]"
@@ -711,7 +699,7 @@ while [ "$1" != "" ]; do
       ;;
     --disk-info)
       f=$(validate_file "${2}")
-      if [ -n "${f}" ] && [ -f "${f}" ]; then
+      if [ -n "${f}" ]; then
         BUILDER_CONFIG["DISK_INFO_CONTENTS"]="${f}"
       else
         print_debug 0 "wrong disk info file was passed [ ${2} ]"
@@ -794,7 +782,7 @@ if [ -z "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
 fi
 
 parse_model_asseertion
-[ -n "${UC_IMAGE_OUTPUT_DIR}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uci-${BUILDER_CONFIG["MODEL"]}")
+[ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uc-i-${BUILDER_CONFIG["MODEL"]}")
 
 # check we have all the permissions
 check_snap_environment
