@@ -332,8 +332,14 @@ update_snapd_recovery_mode () {
     if [ "${BUILDER_CONFIG["BOOTLOADER"]}" == "u-boot" ]; then
       # prepare config file point to target
       local fw_config="/tmp/fw_env-seed.config"
-      echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
-      echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
+      # determine of we use u-boot env partition
+      if [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel" ]; then
+        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
+        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
+      elif [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img" ]; then
+        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img 0x0000 0x2000" > ${fw_config}
+        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img 0x2000 0x2000" >> ${fw_config}
+      fi
       print_debug 4 "u-boot bootloader: fw_setenv --config \"${fw_config}\" \"snapd_recovery_mode\" \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
       fw_setenv --config "${fw_config}" "snapd_recovery_mode" "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
     elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" == "lk" ]; then
@@ -519,6 +525,13 @@ copy_release_files () {
     fi
   done
 
+  # if bootloader is u-boot, check if uboot part env is used
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
+    if [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}"/uboot/ubuntu/ubuntu-boot-state.img ]; then
+      cp "${BUILDER_CONFIG["IMAGE_ROOT"]}"/uboot/ubuntu/ubuntu-boot-state.img \
+         "${BUILDER_CONFIG["OUTPUT_DIR"]}"
+    fi
+  fi
   # if booloader is lk, copy over boot image
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     cp "${BUILDER_CONFIG["WORK_DIR"]}"/lk/* \
