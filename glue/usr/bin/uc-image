@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.4.2
+SCRIPT_VERSION=7.5.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -242,9 +242,9 @@ determine_bootloader () {
   print_debug 5 "bootloader: ${YQ} eval '.volumes.[] | select(.bootloader) | .bootloader' ${BUILDER_CONFIG["GADGET_YAML"]}"
   BUILDER_CONFIG["BOOTLOADER"]="$("${YQ}" eval '.volumes.[] | select(.bootloader) | .bootloader' "${BUILDER_CONFIG["GADGET_YAML"]}")"
   print_debug 5 "BUILDER_CONFIG[\"BOOTLOADER\"]=${BUILDER_CONFIG["BOOTLOADER"]}"
-  BUILDER_CONFIG["IMAGE_ROOT"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
+  BUILDER_CONFIG["SYSTEM_SEED"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
 
-  print_debug 3 "BUILDER_CONFIG[\"IMAGE_ROOT\"]=${BUILDER_CONFIG["IMAGE_ROOT"]}"
+  print_debug 3 "BUILDER_CONFIG[\"IMAGE_ROOT\"]=${BUILDER_CONFIG["SYSTEM_SEED"]}"
   # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
@@ -254,7 +254,7 @@ determine_bootloader () {
   elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "lk" ]; then
     ## lk
     BUILDER_CONFIG["BOOTLOADER"]="lk"
-    mv "${BUILDER_CONFIG["IMAGE_ROOT"]}/boot/lk" "${BUILDER_CONFIG["WORK_DIR"]}/lk"
+    mv "${BUILDER_CONFIG["SYSTEM_SEED"]}/boot/lk" "${BUILDER_CONFIG["WORK_DIR"]}/lk"
     # check if this is amboot special case
     if [ -d "${BUILDER_CONFIG["BOOT_ASSETS"]}/amboot" ]; then
       # set some configuratoon for amboot case
@@ -319,7 +319,7 @@ seed_auto_import_assertion () {
   if [ -n "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" ]; then
     print_debug 1 "\nImporting passed assertion file: [${BUILDER_CONFIG["ASSERTION_IMPORT"]}]"
     local system
-    system=$(realpath "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*)
+    system=$(realpath "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*)
     cp "${BUILDER_CONFIG["ASSERTION_IMPORT"]}" "${system}/auto-import.assert"
   fi
 }
@@ -333,12 +333,12 @@ update_snapd_recovery_mode () {
       # prepare config file point to target
       local fw_config="/tmp/fw_env-seed.config"
       # determine of we use u-boot env partition
-      if [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel" ]; then
-        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
-        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
-      elif [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img" ]; then
-        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img 0x0000 0x2000" > ${fw_config}
-        echo "${BUILDER_CONFIG["IMAGE_ROOT"]}/uboot/ubuntu/ubuntu-boot-state.img 0x2000 0x2000" >> ${fw_config}
+      if [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel" ]; then
+        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
+        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
+      elif [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img" ]; then
+        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img 0x0000 0x2000" > ${fw_config}
+        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img 0x2000 0x2000" >> ${fw_config}
       fi
       print_debug 4 "u-boot bootloader: fw_setenv --config \"${fw_config}\" \"snapd_recovery_mode\" \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
       fw_setenv --config "${fw_config}" "snapd_recovery_mode" "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
@@ -353,7 +353,7 @@ update_snapd_recovery_mode () {
   if [ -n "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" ]; then
     print_debug 1 "\n\tSeeding device encryption context to the image"
     print_debug 1 "\n\t!! This image will only work on the device from which encryption context was fetched !!"
-    cp -r "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" "${BUILDER_CONFIG["IMAGE_ROOT"]}/device"
+    cp -r "${BUILDER_CONFIG["UBUNTU_SEED_DEVICE"]}" "${BUILDER_CONFIG["SYSTEM_SEED"]}/device"
   fi
 }
 
@@ -363,8 +363,8 @@ disk_info_contents () {
   print_debug 5 "disk_info_contents(${BUILDER_CONFIG["DISK_INFO_CONTENTS"]})"
   if [ -n "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" ]; then
     print_debug 1 "\nUsing passed disk info contents: [${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}]"
-    mkdir -p "${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk"
-    cp "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" "${BUILDER_CONFIG["IMAGE_ROOT"]}/.disk/info"
+    mkdir -p "${BUILDER_CONFIG["SYSTEM_SEED"]}/.disk"
+    cp "${BUILDER_CONFIG["DISK_INFO_CONTENTS"]}" "${BUILDER_CONFIG["SYSTEM_SEED"]}/.disk/info"
   fi
 }
 
@@ -446,7 +446,7 @@ create_ubuntu_seed_partition_image () {
   local fs_type
   fs_type=$("${YQ}" eval '.volumes.[].structure.[] | select(.name == "ubuntu-seed") | .filesystem' "${BUILDER_CONFIG["GADGET_YAML"]}")
   create_disk_image \
-      "${BUILDER_CONFIG["IMAGE_ROOT"]}" \
+      "${BUILDER_CONFIG["SYSTEM_SEED"]}" \
       "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed" \
       "${fs_type}" \
       "ubuntu-seed" \
@@ -499,9 +499,9 @@ copy_release_files () {
   # if building factory-reset image without encryption context, use ubuntu-seed dir
   if [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; then
     print_debug 2 "\nUsing image-root dir as output"
-    mv "${BUILDER_CONFIG["IMAGE_ROOT"]}" \
+    mv "${BUILDER_CONFIG["SYSTEM_SEED"]}" \
        "${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
-    BUILDER_CONFIG["IMAGE_ROOT"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
+    BUILDER_CONFIG["SYSTEM_SEED"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-seed"
   fi
 
   # copy gadget boot assets files if making normal release
@@ -527,8 +527,8 @@ copy_release_files () {
 
   # if bootloader is u-boot, check if uboot part env is used
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
-    if [ -e "${BUILDER_CONFIG["IMAGE_ROOT"]}"/uboot/ubuntu/ubuntu-boot-state.img ]; then
-      cp "${BUILDER_CONFIG["IMAGE_ROOT"]}"/uboot/ubuntu/ubuntu-boot-state.img \
+    if [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}"/uboot/ubuntu/ubuntu-boot-state.img ]; then
+      cp "${BUILDER_CONFIG["SYSTEM_SEED"]}"/uboot/ubuntu/ubuntu-boot-state.img \
          "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     fi
   fi
@@ -614,26 +614,26 @@ generate_manifest () {
     echo -e "\n### Snap options ###"
   } >> "${image_manifest}"
 
-  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/options.yaml 1> /dev/null 2>&1; then
-      cat "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/options.yaml >> "${image_manifest}"
+  if ls "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/options.yaml 1> /dev/null 2>&1; then
+      cat "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/options.yaml >> "${image_manifest}"
   fi
 
 
   {
     echo -e "\n### Snap revissions ###" >> "${image_manifest}"
-    grep -A7 "type: snap-revision" "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/assertions/snaps
+    grep -A7 "type: snap-revision" "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/assertions/snaps
     echo -e "\n### Model assertion ###" >> "${image_manifest}"
-    cat "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/model
+    cat "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/model
     echo -e "\n### snap checksums ###"
   } >> "${image_manifest}"
 
-  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
-    sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/systems/*/snaps/*.snap \
+  if ls "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/snaps/*.snap \
       | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
   fi
 
-  if ls "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap 1> /dev/null 2>&1; then
-    sha256sum "${BUILDER_CONFIG["IMAGE_ROOT"]}"/snaps/*.snap \
+  if ls "${BUILDER_CONFIG["SYSTEM_SEED"]}"/snaps/*.snap 1> /dev/null 2>&1; then
+    sha256sum "${BUILDER_CONFIG["SYSTEM_SEED"]}"/snaps/*.snap \
       | awk -F" |/" '{print $1, $NF}' >> "${image_manifest}"
   fi
 }
