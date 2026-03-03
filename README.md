@@ -7,23 +7,25 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
 - Mediatek: native flash tool, fastboot
 - Ambarella: AmbaUSB
 
-## Extra features:
-- --use-android-fs-tools: use Android file system tools (make_ext4fs) to generate sparse files compatible with Android flash tools
-- --build-seed-image: generate reflash image bundle (all the boot asset files, plus compressed ubuntu-seed partition image)
-- --disk-info: File to be used as .disk/info on the image's rootfs
-- --build-raw: do not convert created images to sparse
-- Auto detection of Ambarella build to generate elf files to be used by Ambarella AmbaUSB flash tools.
+## Standard features:
+- -h, --help:              show this help message and exit"
+- --snap SNAP              Install an extra snap, the snap argument can include additional information about the track|risk channel/branch with the following syntax: <snap>=<track|channel/branch>
+                            examples: --snap go=1.14|stable
+                                      --snap avahi.snap
+- --revisions              Specify a subuntu-core-image.revisions file referencing the exact revisions of the provided snaps which should be installed. seeds.manifest is auto generated as ubuntu-core-image.revisions.
+- --preseed                Create pressed image. Tool has to run as root.
+- --preseed-sign-key       Name of the key to use to sign preseed assertion.
+- --validation             Control of the validation sets, choose 'ignore' or 'enforce'.
+- --preseed-sysfs-overlay  Overlay of sysfs to be used when building presseded image.
+                           (--sysfs-overlay) This is required when building images with specific hw interfaces.
+- --auto-import-assertion    Auto import assertion file to be included in root of main writable partiton. This assertion is imported once system is fully seeded. Passed file does not need to have correct file name, it will be renamed.
+- --build-raw              Build raw disk images, instead of sparse one.
+- -O,--output-dir          Output directory.
+- -w DIRECTORY, --workdir  Working directory.
+- -d, --debug              Print debug
+- -dd                      Print verbose debugs
+- -v|--version             Pring version info
+- --disk-info              File to be used as .disk/info on the image's rootfs. This file can contain useful information about the target image, like image identification data, system name, build timestamp etc.
 
-## Obsolete customisation options for Ubuntu Core 16/18
-- --network-config:
-- --disable-console-conf: Disable console conf in the image
-- --netplan-config: Include default netplan config in the image
-- --auto-import-assertion: Include auto-import-assertion file to the image
-- --hooks-directory: Hooks to be invoked at image build time
-- --overlay: Custom overlay to be added to the image
-- --backdoor: Create backdoor in the created image
-- --disable-ssh-server: disable ssh server
-- --journald-storage-persistent: forward journald to persistent storage
-- --seed-root-ssh-authorized-keys:  populate root's authorized_keys (/root/.ssh/authorized_keys) with passed public key(s)
-- --enable-early-getty: Forcefull disabling of console conf and early enablement of getty
-- --set-hostname: set initial hostname to be used at first boot
+## Ubuntu Core 16/18 support
+Support for Ubuntu Core 16/18 is no more supported by uc-image.
