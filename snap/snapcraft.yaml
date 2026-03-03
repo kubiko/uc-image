@@ -114,31 +114,36 @@ parts:
     override-build: |
       # gcc dependency is only for amba builds and supported on arm64 and amd64 only...
       # for native case, we need to rename things, to maintain same build scripts
-      release=""
+      host_arch="x86_64"
+
       if [ "${SNAP_ARCH}" == "arm64" ]; then
-        release="gcc-linaro-11.2.1-2021.10-aarch64_aarch64-unknown-linux-gnu"
-      elif [ "${SNAP_ARCH}" == "amd64" ]; then
-        release="gcc-linaro-11.2.1-2021.10-x86_64_aarch64-linux-gnu"
+        host_arch="aarch64"
       fi
+      version="11.3.rel1"
+      release="arm-gnu-toolchain-${version}-${host_arch}-aarch64-none-elf"
       if [ -n "${release}" ]; then
-        url="https://people.canonical.com/~okubik/toolchains/${release}.tar.xz"
+        url="https://developer.arm.com/-/media/files/downloads/gnu/${version}/binrel/${release}.tar.xz"
         curl -s -L ${url} | tar -xJ \
               --strip-components=1 \
               -C ${CRAFT_PART_INSTALL} \
-              --wildcards "*/aarch64*-linux-gnu/bin/as" \
-              --wildcards "*/aarch64*-linux-gnu/bin/ld" \
-              --wildcards "*/bin/aarch64*-linux-gnu-gcc" \
-              --wildcards "*/bin/*objcopy" \
-              --wildcards "*/bin/*strip" \
-              --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/cc1" \
-              --wildcards "*/libexec/gcc/aarch64*-linux-gnu/*/liblto_plugin.so*"
-        if [ "${CRAFT_ARCH_BUILD_FOR}" == "arm64" ]; then
-          mv ${CRAFT_PART_INSTALL}/aarch64-unknown-linux-gnu ${CRAFT_PART_INSTALL}/aarch64-linux-gnu
-          mv ${CRAFT_PART_INSTALL}/bin/aarch64-unknown-linux-gnu-gcc ${CRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-gcc
-          mv ${CRAFT_PART_INSTALL}/bin/objcopy ${CRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-objcopy
-          mv ${CRAFT_PART_INSTALL}/bin/strip ${CRAFT_PART_INSTALL}/bin/aarch64-linux-gnu-strip
-        fi
+              --wildcards "*/aarch64-none-elf/bin/as" \
+              --wildcards "*/aarch64-none-elf/bin/ld*" \
+              --wildcards "*/bin/aarch64-none-elf-as*" \
+              --wildcards "*/bin/aarch64-none-elf-gcc" \
+              --wildcards "*/bin/aarch64-none-elf-ld*" \
+              --wildcards "*/bin/aarch64-none-elf-objcopy" \
+              --wildcards "*/bin/aarch64-none-elf-strip" \
+              --wildcards "*/libexec/gcc/aarch64-none-elf/*/cc1" \
+              --wildcards "*/libexec/gcc/aarch64-none-elf/*/liblto_plugin.so*"
       fi
+    organize:
+      "aarch64-none-elf":             "aarch64-linux-gnu"
+      "bin/aarch64-none-elf-gcc":     "bin/aarch64-linux-gnu-gcc"
+      "bin/aarch64-none-elf-objcopy": "bin/aarch64-linux-gnu-objcopy"
+      "bin/aarch64-none-elf-strip":   "bin/aarch64-linux-gnu-strip"
+    stage:
+      - -aarch64-linux-gnu/ld.*
+      - -bin/aarch64-none*
 
   android-mkfs-tools:
     plugin: nil
