@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.0
+SCRIPT_VERSION=7.5.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -460,7 +460,7 @@ create_non_ubuntu_partions_images () {
   local fs_type
   local converted_size
   rm -rf "${BUILDER_CONFIG["WORK_DIR"]}/partitions"
-  partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and (.name != "ubuntu-*")) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  partitions=$("${YQ}" eval eval '.volumes.[].structure.[] | select((.filesystem == "*") and ((.name != "ubuntu-seed") and (.name != "ubuntu-boot") and (.name != "ubuntu-save") and (.name != "ubuntu-data"))) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
   for p_name in ${partitions}
   do
     print_debug 2 "\nCreating part image for partition: ${p_name}"
