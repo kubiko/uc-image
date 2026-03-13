@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.2
+SCRIPT_VERSION=7.5.3
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -336,9 +336,9 @@ update_snapd_recovery_mode () {
       if [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel" ]; then
         echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" > ${fw_config}
         echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/boot.sel 0x0000 0x1000" >> ${fw_config}
-      elif [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img" ]; then
-        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img 0x0000 0x2000" > ${fw_config}
-        echo "${BUILDER_CONFIG["SYSTEM_SEED"]}/uboot/ubuntu/ubuntu-boot-state.img 0x2000 0x2000" >> ${fw_config}
+      elif [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-boot-state.img" ]; then
+        echo "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-boot-state.img 0x0000 0x2000" > ${fw_config}
+        echo "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-boot-state.img 0x2000 0x2000" >> ${fw_config}
       fi
       print_debug 4 "u-boot bootloader: fw_setenv --config \"${fw_config}\" \"snapd_recovery_mode\" \"${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}\""
       fw_setenv --config "${fw_config}" "snapd_recovery_mode" "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}"
@@ -460,7 +460,7 @@ create_non_ubuntu_partions_images () {
   local fs_type
   local converted_size
   rm -rf "${BUILDER_CONFIG["WORK_DIR"]}/partitions"
-  partitions=$("${YQ}" eval eval '.volumes.[].structure.[] | select((.filesystem == "*") and ((.name != "ubuntu-seed") and (.name != "ubuntu-boot") and (.name != "ubuntu-save") and (.name != "ubuntu-data"))) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and ((.name != "ubuntu-seed") and (.name != "ubuntu-boot") and (.name != "ubuntu-save") and (.name != "ubuntu-data"))) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
   for p_name in ${partitions}
   do
     print_debug 2 "\nCreating part image for partition: ${p_name}"
@@ -527,8 +527,8 @@ copy_release_files () {
 
   # if bootloader is u-boot, check if uboot part env is used
   if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
-    if [ -e "${BUILDER_CONFIG["SYSTEM_SEED"]}"/uboot/ubuntu/ubuntu-boot-state.img ]; then
-      cp "${BUILDER_CONFIG["SYSTEM_SEED"]}"/uboot/ubuntu/ubuntu-boot-state.img \
+    if [ -e "${BUILDER_CONFIG["WORK_DIR"]}"/ubuntu-boot-state.img ]; then
+      cp "${BUILDER_CONFIG["WORK_DIR"]}"/ubuntu-boot-state.img \
          "${BUILDER_CONFIG["OUTPUT_DIR"]}"
     fi
   fi
