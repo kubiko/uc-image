@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.3
+SCRIPT_VERSION=7.5.4
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -154,7 +154,6 @@ check_snap_environment () {
   # check we are not running as root
   if [ "$USER" =  "root" ] && [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
     echo "Please do not run with sudo, no need for this"
-    exit 0
   fi
 
   # if we are preseeding, we need to run as root
