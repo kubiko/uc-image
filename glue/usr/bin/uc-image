@@ -367,8 +367,63 @@ disk_info_contents () {
   fi
 }
 
+# create ext2/3/4 disk image, populated from volume_source
+# - volume source
+# - target volume image, without file type, it will be added
+# - fstype
+# - volume label
+# - volume size
+create_ext_disk_image() {
+  local volume_source="${1}"
+  local volume_image="${2}"
+  local fs_type="${3}"
+  local volume_label="${4}"
+  local volume_size="${5}"
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t ${fs_type} -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+  ${BUILDER_CONFIG["FAKEROOT"]} mke2fs \
+    -O \
+    -metadata_csum \
+    -T default \
+    -E root_owner=0:0 \
+    -O uninit_bg \
+    -t "${fs_type}" \
+    -L "${volume_label}" \
+    -d "${volume_source}" "${volume_image}.raw" \
+    "${volume_size}" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+}
+
+# create vfat disk image, populated from volume_source
+# - volume source
+# - target volume image, without file type, it will be added
+# - volume label
+# - volume size
+create_vfat_disk_image() {
+  local volume_source="${1}"
+  local volume_image="${2}"
+  local volume_label="${3}"
+  local volume_size="${4}"
+  # mkfs.fat's block-count argument is always a bare KiB count (no K/M/G
+  # suffix), unlike mke2fs, so strip the trailing 'k' added by
+  # normalise_size_to_kb
+  local block_count="${volume_size%k}"
+  print_debug 2 "mkfs.vfat -C -n ${volume_label} ${volume_image}.raw ${block_count}"
+  mkfs.vfat \
+    -C \
+    -n "${volume_label}" \
+    "${volume_image}.raw" \
+    "${block_count}" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+  if [ ! -f "${volume_image}.raw" ]; then
+    return
+  fi
+  # populate content, if any exists, mkfs.vfat has no equivalent of mke2fs -d
+  if [ -n "$(ls -A "${volume_source}" 2>/dev/null)" ]; then
+    print_debug 2 "mcopy -s -i ${volume_image}.raw ${volume_source}/* ::"
+    mcopy -s -i "${volume_image}.raw" "${volume_source}"/* :: 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+  fi
+}
+
 # create image for the volume
-# based on config, this can be ext4 file system image, or tarball
+# based on config, this can be ext2/3/4 or vfat file system image, or tarball
 # passed parameters (not all are used, depending on created volume image)
 # - volume source
 # - target volume image, without file type, it will be added
@@ -382,7 +437,6 @@ create_disk_image() {
   local volume_label="${4}"
   local volume_size="${5}"
   local target_image="${volume_image}.img"
-  # build ext4 disk image
   if [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ]; then
     print_debug 1 "\nCreating tarball for ${volume_label}"
     print_debug 2 "tar -cf ${volume_image}.tar ${volume_source}"
@@ -393,17 +447,11 @@ create_disk_image() {
     print_debug 1 "\nSkipping file system image step for ${volume_label}, as it's not required by the build type."
     target_image="${volume_source}"
   else
-    print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t ${fs_type} -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
-    ${BUILDER_CONFIG["FAKEROOT"]} mke2fs \
-      -O \
-      -metadata_csum \
-      -T default \
-      -E root_owner=0:0 \
-      -O uninit_bg \
-      -t "${fs_type}" \
-      -L "${volume_label}" \
-      -d "${volume_source}" "${volume_image}.raw" \
-      "${volume_size}" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+    if [ "${fs_type}" = "vfat" ]; then
+      create_vfat_disk_image "${volume_source}" "${volume_image}" "${volume_label}" "${volume_size}"
+    else
+      create_ext_disk_image "${volume_source}" "${volume_image}" "${fs_type}" "${volume_label}" "${volume_size}"
+    fi
     if [ ! -f "${volume_image}.raw" ]; then
       print_debug 1 "\nVolume creation for ${volume_label} partiton failed, bailing out!!!"
       exit 0
