@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.4
+SCRIPT_VERSION=7.5.5
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -72,7 +72,7 @@ print_help () {
   echo "                                     --snap avahi.snap"
   echo "  --revisions              Specify a seeds.manifest file referencing the exact revisions"
   echo "                           of the provided snaps which should be installed"
-  echo "                           seeds.manifest is auto generated as ubuntu-core-image.revisions"
+  echo "                           seeds.manifest is auto generated as manifest/ubuntu-core-image.revisions"
   echo "  -c CHANNEL, --channel CHANNEL"
   echo "                           The snap channel to use, one of stable/candidate/beta/edge"
   echo "                           stable channel is assumed if no channel is defined"
@@ -688,7 +688,8 @@ run_amba_image_build () {
 
 # generate image manifest
 generate_manifest () {
-  local image_manifest="${BUILDER_CONFIG["OUTPUT_DIR"]}/ubuntu-core-image.manifest"
+  local image_manifest="${BUILDER_CONFIG["MANIFEST_DIR"]}/ubuntu-core-image.manifest"
+  mkdir -p "${BUILDER_CONFIG["MANIFEST_DIR"]}"
   {
     echo -e "### Ubuntu Core image build ###"
     echo -e "$(date)"
@@ -879,6 +880,9 @@ fi
 
 parse_model_asseertion
 [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uc-i-${BUILDER_CONFIG["MODEL"]}")
+# manifest files go to a subdirectory so flash tools scanning the output
+# directory (e.g. genio-flash) do not pick them up
+BUILDER_CONFIG["MANIFEST_DIR"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/manifest"
 
 # check we have all the permissions
 check_snap_environment
@@ -954,7 +958,7 @@ fi
 # create/copy image manifest
 generate_manifest
 if [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" ]; then
-  cp "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" "${BUILDER_CONFIG["OUTPUT_DIR"]}"
+  cp "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" "${BUILDER_CONFIG["MANIFEST_DIR"]}"
 fi
 
 print_debug 0 "\nOutput available in: '${BUILDER_CONFIG["OUTPUT_DIR"]}'"

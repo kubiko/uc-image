@@ -12,7 +12,7 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
 - `--snap`                   Install an extra snap, the snap argument can include additional information about the track|risk channel/branch with the following syntax: <snap>=<track|channel/branch>
                              Examples: `--snap go=1.14|stable`
                                       `--snap avahi.snap`
-- `--revisions`              Specify a subuntu-core-image.revisions file referencing the exact revisions of the provided snaps which should be installed. `seeds.manifest` and `ubuntu-core-image.revisions` are auto-generated for each build.
+- `--revisions`              Specify a subuntu-core-image.revisions file referencing the exact revisions of the provided snaps which should be installed. `ubuntu-core-image.manifest` and `ubuntu-core-image.revisions` are auto-generated for each build in the `manifest/` subdirectory of the output directory.
 - `--preseed`                Create pressed image. The tool has to run as root.
 - `--preseed-sign-key`       Name of the key to use to sign preseed assertion.
 - `--validation`             Control of the validation sets, choose 'ignore' or 'enforce'.
