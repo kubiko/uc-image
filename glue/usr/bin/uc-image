@@ -500,13 +500,39 @@ create_ubuntu_seed_partition_image () {
       "${SEED_SIZE}"
 }
 
+# locate the directory "snap prepare-image" resolved a structure's gadget
+# content into (this is where content sourced with e.g. $kernel:dtbs/dtbs/
+# ends up, already copied out of the unpacked kernel snap), for a given
+# partition/structure name.
+# prints the resolved content directory path; prints nothing if the
+# structure could not be found in any volume
+resolve_partition_content_dir () {
+  local p_name="${1}"
+  local vol
+  for vol in $("${YQ}" eval '.volumes | keys | .[]' "${BUILDER_CONFIG["GADGET_YAML"]}"); do
+    local names
+    names=$(vol=${vol} "${YQ}" eval '.volumes[strenv(vol)].structure[].name' "${BUILDER_CONFIG["GADGET_YAML"]}")
+    local idx=0
+    local name
+    while IFS= read -r name; do
+      if [ "${name}" = "${p_name}" ]; then
+        echo "${BUILDER_CONFIG["WORK_DIR"]}/resolved-content/${vol}/part${idx}"
+        return
+      fi
+      idx=$((idx + 1))
+    done <<< "${names}"
+  done
+}
+
 create_non_ubuntu_partions_images () {
   print_debug 1 "\nCreating non Ubuntu partitions images"
   local partitions
   local size
   local fs_type
   local converted_size
+  local content_dir
   rm -rf "${BUILDER_CONFIG["WORK_DIR"]}/partitions"
+  mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}/partitions"
   partitions=$("${YQ}" eval '.volumes.[].structure.[] | select((.filesystem == "*") and ((.name != "ubuntu-seed") and (.name != "ubuntu-boot") and (.name != "ubuntu-save") and (.name != "ubuntu-data"))) | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")
   for p_name in ${partitions}
   do
@@ -514,10 +540,16 @@ create_non_ubuntu_partions_images () {
     size=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .size' "${BUILDER_CONFIG["GADGET_YAML"]}")
     fs_type=$(name=${p_name} "${YQ}" eval '.volumes.[].structure.[] | select(.name == strenv(name)) | .filesystem' "${BUILDER_CONFIG["GADGET_YAML"]}")
     converted_size="$(normalise_size_to_kb "${size}")k"
-    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}"
-    # TODO: support preseeded content from gadget snap
+    # use the gadget/kernel content snap prepare-image already resolved
+    # (e.g. $kernel:dtbs/dtbs/ content), falling back to an empty
+    # partition when there is none
+    content_dir="$(resolve_partition_content_dir "${p_name}")"
+    if [ -z "${content_dir}" ] || [ ! -d "${content_dir}" ]; then
+      content_dir="${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}"
+      mkdir -p "${content_dir}"
+    fi
     create_disk_image \
-      "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}" \
+      "${content_dir}" \
       "${BUILDER_CONFIG["WORK_DIR"]}/partitions/${p_name}" \
       "${fs_type}" \
       "${p_name}" \
