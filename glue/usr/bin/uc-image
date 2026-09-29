@@ -39,7 +39,11 @@ BUILDER_CONFIG["VALIDATION"]="ignore"
 # Qualcomm flash supporting files flashall, rawprogram*, patch*, prog_fire*
 # dragonboard 410c: sbc_1.0_8016.bin
 # Renesas: flash-uc.sh, Flash_Writer_*, fip- bl2_*
-BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed*.imx imx-boot.* bst_release.bin.signed reflash-system.sh flash-uc.sh Flash_Writer_* fip- bl2_*"
+# Mediatek Genio: ubuntu.json (genio-flash config file), lk.bin (preloader),
+# u-boot-initial-env (default u-boot env used by genio-flash), MBR_EMMC_UBUNTU
+# (GPT written to the eMMC by genio-flash), MBR_UFS (GPT written to the UFS by
+# genio-flash)
+BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed*.imx imx-boot.* bst_release.bin.signed reflash-system.sh flash-uc.sh Flash_Writer_* fip- bl2_* ubuntu.json lk.bin u-boot-initial-env MBR_EMMC_UBUNTU MBR_UFS"
 
 # delete all logs
 rm -rf "$(dirname "$(mktemp -u -t uc-image-builder-XXXX)")"/uc-image-builder-* 2> /dev/null
