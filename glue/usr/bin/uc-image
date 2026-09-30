@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.5
+SCRIPT_VERSION=7.5.6
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -80,6 +80,11 @@ print_help () {
   echo "  --preseed                Pressed the image."
   echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
   echo "  --validation             Control of the validation sets, choose 'ignore' or 'enforce', default: '${BUILDER_CONFIG["VALIDATION"]}'"
+  echo "  --sector-size SECTOR-SIZE"
+  echo "                           Logical sector size of the target storage, 512 or 4096."
+  echo "                           Set it to 4096 for 4k storage (e.g. UFS), so the vfat/ext"
+  echo "                           partition images can be mounted by the device."
+  echo "                           If not given, tools defaults are used (512 bytes sectors)."
   echo "  --preseed-sysfs-overlay, Overlay of sysfs to be used when building presseded image."
   echo "         (--sysfs-overlay) This is required when building images with specific hw interfaces"
   echo "  -d, --debug              Print debug"
@@ -383,8 +388,15 @@ create_ext_disk_image() {
   local fs_type="${3}"
   local volume_label="${4}"
   local volume_size="${5}"
-  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t ${fs_type} -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
+  # an ext file system block size must not be smaller than the device sector
+  # size, and ext supports 1k blocks at minimum, so 512 needs no override
+  local block_size_args=()
+  if [ -n "${BUILDER_CONFIG["SECTOR_SIZE"]}" ] && [ "${BUILDER_CONFIG["SECTOR_SIZE"]}" -gt 1024 ]; then
+    block_size_args=(-b "${BUILDER_CONFIG["SECTOR_SIZE"]}")
+  fi
+  print_debug 2 "${BUILDER_CONFIG["FAKEROOT"]} mke2fs ${block_size_args[*]} -O -metadata_csum -T default -E root_owner=0:0 -O uninit_bg -t ${fs_type} -L ${volume_label} -d ${volume_source} ${volume_image}.raw ${volume_size}"
   ${BUILDER_CONFIG["FAKEROOT"]} mke2fs \
+    "${block_size_args[@]}" \
     -O \
     -metadata_csum \
     -T default \
@@ -410,8 +422,14 @@ create_vfat_disk_image() {
   # suffix), unlike mke2fs, so strip the trailing 'k' added by
   # normalise_size_to_kb
   local block_count="${volume_size%k}"
-  print_debug 2 "mkfs.vfat -C -n ${volume_label} ${volume_image}.raw ${block_count}"
+  # the logical sector size of the file system can not be smaller than the device one
+  local sector_size_args=()
+  if [ -n "${BUILDER_CONFIG["SECTOR_SIZE"]}" ]; then
+    sector_size_args=(-S "${BUILDER_CONFIG["SECTOR_SIZE"]}")
+  fi
+  print_debug 2 "mkfs.vfat ${sector_size_args[*]} -C -n ${volume_label} ${volume_image}.raw ${block_count}"
   mkfs.vfat \
+    "${sector_size_args[@]}" \
     -C \
     -n "${volume_label}" \
     "${volume_image}.raw" \
@@ -813,6 +831,18 @@ while [ "$1" != "" ]; do
       else
         print_debug 0 "Missing ubuntu-seed-device-dir parameter"
       fi
+      shift
+      ;;
+    --sector-size)
+      case "${2}" in
+        512 | 4096)
+          BUILDER_CONFIG["SECTOR_SIZE"]="${2}"
+          ;;
+        *)
+          print_debug 0 "Unsupported sector size '${2}', only 512 and 4096 are supported"
+          exit 1
+          ;;
+      esac
       shift
       ;;
     --help | -h)
