@@ -18,6 +18,7 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
 - `--validation`             Control of the validation sets, choose 'ignore' or 'enforce'.
 - `--preseed-sysfs-overlay`  Overlay of sysfs to be used when building presseded image. This is required when building images with specific hw interfaces.
 - `--auto-import-assertion`  Auto import assertion file to be included in the root of the main writable partition. This assertion is imported once the system is fully seeded. A passed file does not need to have the correct file name; it will be renamed.
+- `--sector-size`            Logical sector size of the target storage, 512 or 4096. Use 4096 for 4k storage such as UFS.
 - `--build-raw`              Build raw disk images, instead of sparse ones.
 - `-O`, `--output-dir`       Output directory.
 - `-w`, `--workdir`          Working directory.
