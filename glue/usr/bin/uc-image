@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.5.6
+SCRIPT_VERSION=7.6.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -108,6 +108,7 @@ print_help () {
   echo "                           exits. If not given, a temporary working directory is"
   echo "                           used instead under /tmp"
   echo " --build-raw               Build raw images, instead of sparse ones"
+  echo " --assert                  Include the assertion from the local file"
   echo " --auto-import-assertion   ASSERTION FILE"
   echo "                           Auto import assertion file to be included in root of main writable partiton."
   echo "                           This assertion is imported once system is fully seeded"
@@ -812,6 +813,16 @@ while [ "$1" != "" ]; do
       fi
       shift
       ;;
+    --assert)
+      f=$(validate_file "${2}")
+      if [ -n "${f}" ]; then
+        BUILDER_CONFIG["ASSERT"]="${f}"
+      else
+        print_debug 0 "wrong assertion file to add [ ${2} ]"
+        exit
+      fi
+      shift
+      ;;
     --disk-info)
       f=$(validate_file "${2}")
       if [ -n "${f}" ]; then
@@ -926,7 +937,7 @@ print_builder_config
 BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions"
 
 # run snap prepare image with all known parameters
-image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["ASSERT"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
 print_debug 1 "Running: ${image_build_command}"
 run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
 retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result")
