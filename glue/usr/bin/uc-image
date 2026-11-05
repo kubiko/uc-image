@@ -30,6 +30,10 @@ YQ="${SNAP}/usr/bin/yq"
 # fill in default values
 BUILDER_CONFIG["DEBUG_LEVEL"]="${UC_IMAGE_DEBUG_LEVEL}"
 BUILDER_CONFIG["VALIDATION"]="ignore"
+BUILDER_CONFIG["AB_SUPPORT"]="${UC_IMAGE_AB_SUPPORT:-on}"
+
+# A/B slot support is a module of its own, see the file
+AB_MODULE="$(dirname "$(${READLINK} -f "${BASH_SOURCE[0]}")")/../lib/uc-image/ab-slots.sh"
 
 # special files to be copied from gadget snap if any exists
 # they are typically not mapped to any partition, so won't be picked based on
@@ -120,6 +124,8 @@ print_help () {
   echo " --build-disk-image        Also build a whole disk image of each gadget volume, as"
   echo "                           <volume>.img, with the partition table and all content,"
   echo "                           which qemu can boot or dd can write to a disk."
+  echo " --no-ab-support           Switch off A/B slot support. A gadget with A/B slots is"
+  echo "                           then refused."
   echo " --assert                  Include the assertion from the local file"
   echo " --auto-import-assertion   ASSERTION FILE"
   echo "                           Auto import assertion file to be included in root of main writable partiton."
@@ -158,6 +164,7 @@ print_help () {
   echo "Supported env variables:"
   echo "    UC_IMAGE_DEBUG_LEVEL:  Default log level"
   echo "                           0 - no logs, 3 - detailed logs. Default level is '1'"
+  echo "    UC_IMAGE_AB_SUPPORT:   'off' does what --no-ab-support does"
 }
 
 # normalize version
@@ -344,6 +351,39 @@ size_to_bytes () {
     (*K | *k) echo "$((${size%[Kk]} * 1024))" ;;
     (*) echo "$((size))" ;;
   esac
+}
+
+# load the A/B slot support, unless it is switched off or not shipped
+load_ab_support () {
+  case "${BUILDER_CONFIG["AB_SUPPORT"]}" in
+    (off | false | 0 | no)
+      BUILDER_CONFIG["AB_SUPPORT"]="off"
+      ;;
+    (*)
+      if [ -r "${AB_MODULE}" ]; then
+        BUILDER_CONFIG["AB_SUPPORT"]="on"
+        # shellcheck disable=SC1090 # the module is next to this script
+        source "${AB_MODULE}"
+      else
+        BUILDER_CONFIG["AB_SUPPORT"]="off"
+      fi
+      ;;
+  esac
+}
+
+# a gadget with the system-slot-a role asks for an image with A/B slots
+detect_ab_image () {
+  print_debug 3 "detect_ab_image"
+  if [ -z "$("${YQ}" eval '.volumes.[].structure.[] | select(.role == "system-slot-a") | .name' "${BUILDER_CONFIG["GADGET_YAML"]}")" ]; then
+    return
+  fi
+  if [ "${BUILDER_CONFIG["AB_SUPPORT"]}" != "on" ]; then
+    print_debug 0 "The gadget has A/B slots, and A/B support is switched off, bailing out"
+    exit 1
+  fi
+  print_debug 1 "\nDetected A/B slots in the gadget"
+  BUILDER_CONFIG["AB_IMAGE"]="true"
+  ab_check_image
 }
 
 # seed passed assertion as auto import assertion
@@ -724,6 +764,9 @@ disk_structure_image () {
   local name="${1}"
   local role="${2}"
   local image
+  if [ "${BUILDER_CONFIG["AB_IMAGE"]}" = "true" ] && ab_disk_structure_image "${role}"; then
+    return
+  fi
   if [ "${role}" = "system-seed" ]; then
     image="${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw"
   else
@@ -736,8 +779,9 @@ disk_structure_image () {
 #
 # Layout follows gadget.yaml the way snapd reads it: a structure with no offset
 # follows the farthest one, and nothing without an offset goes before 1 MiB.
-# ubuntu-boot, ubuntu-save and ubuntu-data take space on the disk, but the
-# install creates them, so they get no partition, as with ubuntu-image.
+# ubuntu-boot, ubuntu-save and ubuntu-data take space on the disk, but on a
+# system which is not A/B the install creates them, so they get no partition,
+# as with ubuntu-image.
 # - name of the volume
 create_volume_disk_image () {
   local volume="${1}"
@@ -777,6 +821,8 @@ create_volume_disk_image () {
       (mbr:* | *:mbr | *:bare)
         ;;
       (system-boot:* | system-save:* | system-data:*)
+        [ "${BUILDER_CONFIG["AB_IMAGE"]}" = "true" ] \
+          && partition_table_entry "${schema}" "${name}" "${type}" "${offset}" "${size}" >> "${table}"
         ;;
       (*)
         partition_table_entry "${schema}" "${name}" "${type}" "${offset}" "${size}" >> "${table}"
@@ -908,6 +954,12 @@ generate_manifest () {
     cat "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/model
     echo -e "\n### snap checksums ###"
   } >> "${image_manifest}"
+
+  # the slots hold the snaps of an A/B image
+  if [ "${BUILDER_CONFIG["AB_IMAGE"]}" = "true" ]; then
+    ab_manifest >> "${image_manifest}"
+    return
+  fi
 
   if ls "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/snaps/*.snap 1> /dev/null 2>&1; then
     sha256sum "${BUILDER_CONFIG["SYSTEM_SEED"]}"/systems/*/snaps/*.snap \
@@ -1068,6 +1120,9 @@ while [ "$1" != "" ]; do
     --build-disk-image)
       BUILDER_CONFIG["BUILD_DISK_IMAGE"]="true"
       ;;
+    --no-ab-support)
+      BUILDER_CONFIG["AB_SUPPORT"]="off"
+      ;;
     --build-compresed-seed)
       BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
       ;;
@@ -1146,6 +1201,7 @@ if [ -z "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
   exit
 fi
 
+load_ab_support
 
 parse_model_asseertion
 [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uc-i-${BUILDER_CONFIG["MODEL"]}")
@@ -1188,6 +1244,7 @@ BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
 mv "${BUILDER_CONFIG["TMP_LOG_FILE"]}" "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
 # determine bootloader
 determine_bootloader
+detect_ab_image
 
 # a disk image is not built out of the amba firmware images
 if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ] && [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
@@ -1221,6 +1278,8 @@ fi
 
 # create images for non-ubuntu partitions if needed
 create_non_ubuntu_partions_images
+
+[ "${BUILDER_CONFIG["AB_IMAGE"]}" = "true" ] && ab_create_images
 
 # copy release files to output directory or run amba image build
 # if we are building system-seed image, do not run amba_image_build
