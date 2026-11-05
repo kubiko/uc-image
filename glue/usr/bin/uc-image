@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.6.0
+SCRIPT_VERSION=7.7.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -64,6 +64,12 @@ print_help () {
   echo ""
   echo "optional arguments:"
   echo "  -h, --help               show this help message and exit"
+  echo "  --prepared-image DIRECTORY"
+  echo "                           Build from what 'snap prepare-image <model> <dir>' wrote,"
+  echo "                           instead of running it. The model comes from the seed, so"
+  echo "                           model_assertion is not given, and the options which only"
+  echo "                           feed 'snap prepare-image' are ignored. The directory is"
+  echo "                           copied, never written to."
   echo "  --snap SNAP              Install an extra snap."
   echo "                           This is passed through to 'snap prepare-image'. The snap argument can include"
   echo "                           additional information about the track|risk channel/branch"
@@ -77,6 +83,9 @@ print_help () {
   echo "                           The snap channel to use, one of stable/candidate/beta/edge"
   echo "                           stable channel is assumed if no channel is defined"
   echo "                           example: -c edge"
+  echo "  --allow-snapd-kernel-mismatch"
+  echo "                           Passed through to 'snap prepare-image', for a kernel snap"
+  echo "                           which does not declare the snapd it needs."
   echo "  --preseed                Pressed the image."
   echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
   echo "  --validation             Control of the validation sets, choose 'ignore' or 'enforce', default: '${BUILDER_CONFIG["VALIDATION"]}'"
@@ -108,6 +117,9 @@ print_help () {
   echo "                           exits. If not given, a temporary working directory is"
   echo "                           used instead under /tmp"
   echo " --build-raw               Build raw images, instead of sparse ones"
+  echo " --build-disk-image        Also build a whole disk image of each gadget volume, as"
+  echo "                           <volume>.img, with the partition table and all content,"
+  echo "                           which qemu can boot or dd can write to a disk."
   echo " --assert                  Include the assertion from the local file"
   echo " --auto-import-assertion   ASSERTION FILE"
   echo "                           Auto import assertion file to be included in root of main writable partiton."
@@ -254,8 +266,11 @@ determine_bootloader () {
   BUILDER_CONFIG["SYSTEM_SEED"]=${BUILDER_CONFIG["WORK_DIR"]}/system-seed
 
   print_debug 3 "BUILDER_CONFIG[\"IMAGE_ROOT\"]=${BUILDER_CONFIG["SYSTEM_SEED"]}"
-  # we can have u-boot, lk, or special case of lk amboot(Ambarella amboot)
-  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
+  # we can have grub, u-boot, lk, or special case of lk amboot(Ambarella amboot)
+  if [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "grub" ]; then
+    ## grub, everything it needs is in the seed
+    BUILDER_CONFIG["BOOTLOADER"]="grub"
+  elif [ "${BUILDER_CONFIG["BOOTLOADER"]}" = "u-boot" ]; then
     ## u-boot
     BUILDER_CONFIG["BOOTLOADER"]="u-boot"
     # check if we have defined dtb
@@ -318,6 +333,17 @@ normalise_size_to_kb () {
     (*) size=$(("${size}" / 1024)) ;;
   esac
   echo "${size}"
+}
+
+# print passed gadget size or offset in bytes
+size_to_bytes () {
+  local size=${1}
+  case ${size} in
+    (*G | *g) echo "$((${size%[Gg]} * 1024 * 1024 * 1024))" ;;
+    (*M | *m) echo "$((${size%[Mm]} * 1024 * 1024))" ;;
+    (*K | *k) echo "$((${size%[Kk]} * 1024))" ;;
+    (*) echo "$((size))" ;;
+  esac
 }
 
 # seed passed assertion as auto import assertion
@@ -439,9 +465,16 @@ create_vfat_disk_image() {
     return
   fi
   # populate content, if any exists, mkfs.vfat has no equivalent of mke2fs -d
-  if [ -n "$(ls -A "${volume_source}" 2>/dev/null)" ]; then
+  # '.disk' is content too, so no glob
+  local entries=()
+  mapfile -d '' -t entries < <(find "${volume_source}" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | sort -z)
+  if [ "${#entries[@]}" -gt 0 ]; then
     print_debug 2 "mcopy -s -i ${volume_image}.raw ${volume_source}/* ::"
-    mcopy -s -i "${volume_image}.raw" "${volume_source}"/* :: 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+    mcopy -s -i "${volume_image}.raw" "${entries[@]}" :: 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+      print_debug 0 "\nCannot populate ${volume_label}, bailing out!!!"
+      exit 1
+    fi
   fi
 }
 
@@ -616,8 +649,10 @@ copy_release_files () {
   done
 
   # copy over special files e.g. gpt_*, uc.lst. Assume use of wild cards
+  # a gadget need not have a boot assets directory, a grub one has none
   for sf in ${BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]}
   do
+    [ -n "${BUILDER_CONFIG["BOOT_ASSETS"]}" ] || break
     # shellcheck disable=SC2086 # SC2086 is irrelevant, 'sf' can contain wild cards
     if compgen -G "${BUILDER_CONFIG["BOOT_ASSETS"]}"/${sf} > /dev/null; then
       # shellcheck disable=SC2086 # SC2086 is irrelevant, 'sf' can contain wild cards
@@ -649,6 +684,150 @@ copy_release_files () {
     mv "${BUILDER_CONFIG["WORK_DIR"]}/partitions/"*.tar \
        "${BUILDER_CONFIG["OUTPUT_DIR"]}"
   fi
+}
+
+# write an image to a disk image
+# - disk image
+# - image to write
+# - offset in the disk image, in bytes
+write_to_disk_image () {
+  print_debug 2 "dd if=${2} of=${1} bs=1M oflag=seek_bytes seek=${3} conv=notrunc,sparse"
+  if ! dd if="${2}" of="${1}" bs=1M oflag=seek_bytes seek="${3}" conv=notrunc,sparse status=none; then
+    print_debug 0 "\nCannot write ${2} to the disk image, bailing out!!!"
+    exit 1
+  fi
+}
+
+# print the sfdisk line of a partition, nothing if the structure has no partition
+# - schema of the volume, gpt or mbr
+# - name, type, offset and size of the structure, the last two in bytes
+partition_table_entry () {
+  local schema="${1}"
+  local name="${2}"
+  local type="${3}"
+  local sector_size="${BUILDER_CONFIG["SECTOR_SIZE"]:-512}"
+  local location="start=$((${4} / sector_size)), size=$((${5} / sector_size))"
+  # a hybrid type is '<mbr type>,<gpt guid>'
+  case "${schema}" in
+    (mbr)
+      echo "${location}, type=${type%%,*}"
+      ;;
+    (*)
+      echo "${location}, type=${type##*,}, name=\"${name}\""
+      ;;
+  esac
+}
+
+# print the image of a structure, nothing for a structure which stays empty
+# - name and role of the structure
+disk_structure_image () {
+  local name="${1}"
+  local role="${2}"
+  local image
+  if [ "${role}" = "system-seed" ]; then
+    image="${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-seed.raw"
+  else
+    image="${BUILDER_CONFIG["WORK_DIR"]}/partitions/${name}.raw"
+  fi
+  [ ! -e "${image}" ] || echo "${image}"
+}
+
+# create the whole disk image of a gadget volume
+#
+# Layout follows gadget.yaml the way snapd reads it: a structure with no offset
+# follows the farthest one, and nothing without an offset goes before 1 MiB.
+# ubuntu-boot, ubuntu-save and ubuntu-data take space on the disk, but the
+# install creates them, so they get no partition, as with ubuntu-image.
+# - name of the volume
+create_volume_disk_image () {
+  local volume="${1}"
+  local disk="${BUILDER_CONFIG["OUTPUT_DIR"]}/${volume}.img"
+  local table="${BUILDER_CONFIG["WORK_DIR"]}/${volume}.sfdisk"
+  local writes=()
+  local schema index=0 next=$((1024 * 1024)) end=0
+  local name role type size offset image sfdisk_args=()
+  print_debug 1 "\nCreating disk image of volume ${volume}"
+  schema=$(vol=${volume} "${YQ}" eval '.volumes[strenv(vol)].schema // "gpt"' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  if [ "${schema}" = "mbr" ]; then
+    echo "label: dos" > "${table}"
+  else
+    # first-lba, a gadget may have a partition ahead of the default 1 MiB
+    {
+      echo "label: gpt"
+      echo "first-lba: 34"
+    } > "${table}"
+  fi
+  # '@tsv' fields are tab separated, and 'read' merges runs of tabs, so a
+  # missing field is '-' rather than empty
+  while IFS=$'\t' read -r name role type size offset
+  do
+    size="$(size_to_bytes "${size}")"
+    if [ "${offset}" = "-" ]; then
+      offset=${next}
+      [ "${role}" = "mbr" ] || [ "${type}" = "mbr" ] && offset=0
+    else
+      offset="$(size_to_bytes "${offset}")"
+    fi
+    if [ "$((offset + size))" -gt "${end}" ]; then
+      end=$((offset + size))
+    fi
+    [ "${end}" -gt "${next}" ] && next=${end}
+
+    case "${role}:${type}" in
+      (mbr:* | *:mbr | *:bare)
+        ;;
+      (system-boot:* | system-save:* | system-data:*)
+        ;;
+      (*)
+        partition_table_entry "${schema}" "${name}" "${type}" "${offset}" "${size}" >> "${table}"
+        ;;
+    esac
+
+    image="$(disk_structure_image "${name}" "${role}")"
+    if [ -n "${image}" ]; then
+      writes+=("${image}|${offset}")
+    fi
+    # images of the gadget, written raw into the structure
+    while IFS=$'\t' read -r image content_offset
+    do
+      [ -n "${image}" ] || continue
+      writes+=("${BUILDER_CONFIG["GADGET_DIR"]}/${image}|$((offset + $(size_to_bytes "${content_offset}")))")
+    done < <(vol=${volume} idx=${index} "${YQ}" eval \
+               '.volumes[strenv(vol)].structure[env(idx)].content[] | select(.image) | [.image, (.offset // 0)] | @tsv' \
+               "${BUILDER_CONFIG["GADGET_YAML"]}")
+    index=$((index + 1))
+  done < <(vol=${volume} "${YQ}" eval \
+             '.volumes[strenv(vol)].structure[] | [(.name // "-"), (.role // "-"), .type, (.size // .["min-size"]), (.offset // "-")] | @tsv' \
+             "${BUILDER_CONFIG["GADGET_YAML"]}")
+
+  # the backup GPT takes the end of the disk
+  truncate -s "$(((end / (1024 * 1024) + 2) * 1024 * 1024))" "${disk}"
+  if [ -n "${BUILDER_CONFIG["SECTOR_SIZE"]}" ]; then
+    sfdisk_args=(--sector-size "${BUILDER_CONFIG["SECTOR_SIZE"]}")
+  fi
+  print_debug 2 "sfdisk ${sfdisk_args[*]} --no-reread --no-tell-kernel ${disk} < ${table}"
+  if ! sfdisk -q "${sfdisk_args[@]}" --no-reread --no-tell-kernel "${disk}" < "${table}" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"; then
+    print_debug 0 "\nCannot write the partition table of ${volume}, bailing out!!!"
+    exit 1
+  fi
+  for image in "${writes[@]}"
+  do
+    write_to_disk_image "${disk}" "${image%|*}" "${image##*|}"
+  done
+}
+
+# create a whole disk image for each gadget volume
+create_disk_images () {
+  local volume
+  for volume in $("${YQ}" eval '.volumes | keys | .[]' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  do
+    # the hardware boot partitions of an eMMC are not on a disk
+    if [ "$(vol=${volume} "${YQ}" eval '.volumes[strenv(vol)].schema' "${BUILDER_CONFIG["GADGET_YAML"]}")" = "emmc" ]; then
+      print_debug 1 "\nSkipping disk image of eMMC hardware volume ${volume}"
+      continue
+    fi
+    create_volume_disk_image "${volume}"
+  done
 }
 
 run_amba_image_build () {
@@ -749,6 +928,17 @@ run_snap_prepare_image() {
   echo ${retValue} > "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
 }
 
+# copy the prepared image directory into the work directory, which is changed
+# as a build goes. '--no-dereference', the seed's snaps can be links to devices
+# of the target
+use_prepared_image () {
+  print_debug 1 "Building from prepared image directory: [${BUILDER_CONFIG["PREPARED_IMAGE"]}]"
+  if ! cp --recursive --reflink=auto --no-dereference "${BUILDER_CONFIG["PREPARED_IMAGE"]}/." "${BUILDER_CONFIG["WORK_DIR"]}/"; then
+    print_debug 0 "cannot populate the work directory from [${BUILDER_CONFIG["PREPARED_IMAGE"]}], bailing out"
+    exit 1
+  fi
+}
+
 # store invoked command
 BUILDER_CONFIG["ARGS"]="${*}"
 # parse passed parameters
@@ -791,6 +981,18 @@ while [ "$1" != "" ]; do
       BUILDER_CONFIG["VALIDATION"]="${2}"
       shift
     ;;
+    --prepared-image)
+      d="$(${READLINK} -f "${2}")"
+      if [ ! -e "${d}/gadget/meta/gadget.yaml" ] || ! compgen -G "${d}/system-seed/systems/*/model" > /dev/null; then
+        print_debug 0 "[${2}] is no 'snap prepare-image' output, it has no 'system-seed/systems/*/model' and 'gadget/meta/gadget.yaml'"
+        exit 1
+      fi
+      BUILDER_CONFIG["PREPARED_IMAGE"]="${d}"
+      shift
+      ;;
+    --allow-snapd-kernel-mismatch)
+      BUILDER_CONFIG["KERNEL_MISMATCH"]="--allow-snapd-kernel-mismatch"
+      ;;
     -O | --output-dir)
       BUILDER_CONFIG["OUTPUT_DIR"]="$(${READLINK} -f "${2}")"
       if [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
@@ -863,6 +1065,9 @@ while [ "$1" != "" ]; do
     --build-raw)
       BUILDER_CONFIG["BUILD_RAW"]="true"
       ;;
+    --build-disk-image)
+      BUILDER_CONFIG["BUILD_DISK_IMAGE"]="true"
+      ;;
     --build-compresed-seed)
       BUILDER_CONFIG["BUILD_COMPRESSED_SEED"]="true"
       ;;
@@ -914,10 +1119,33 @@ if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
   BUILDER_CONFIG["FAKEROOT"]=""
 fi
 
+# a disk image needs the file system image of the seed
+if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ] && \
+   { [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ] || [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; }; then
+  print_debug 0 "--build-disk-image needs a seed image, it does not go with tar or directory seeds"
+  exit 1
+fi
+
+if [ -n "${BUILDER_CONFIG["PREPARED_IMAGE"]}" ]; then
+  if [ -n "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
+    print_debug 0 "--prepared-image brings its model along, do not pass model_assertion"
+    exit 1
+  fi
+  # this directory is removed before a build starts
+  case "${BUILDER_CONFIG["PREPARED_IMAGE"]}" in
+    ("${BUILDER_CONFIG["WORK_DIR"]:-/tmp/uc-i-workdir-*}" | /tmp/uc-i-workdir-*)
+      print_debug 0 "[${BUILDER_CONFIG["PREPARED_IMAGE"]}] is a work directory, which a build removes before it starts, copy it elsewhere first"
+      exit 1
+      ;;
+  esac
+  BUILDER_CONFIG["MODEL_ASSERTION"]="$(realpath "${BUILDER_CONFIG["PREPARED_IMAGE"]}"/system-seed/systems/*/model)"
+fi
+
 if [ -z "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
   print_debug 0 "model_assertion is not set"
   exit
 fi
+
 
 parse_model_asseertion
 [ -z "${BUILDER_CONFIG["OUTPUT_DIR"]}" ] && BUILDER_CONFIG["OUTPUT_DIR"]=$(${READLINK} -f "uc-i-${BUILDER_CONFIG["MODEL"]}")
@@ -936,18 +1164,22 @@ print_builder_config
 # always export snap revision manifest
 BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions"
 
-# run snap prepare image with all known parameters
-image_build_command="snap prepare-image ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["ASSERT"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
-print_debug 1 "Running: ${image_build_command}"
-run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
-retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result")
-rm -rf "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
-if [ "${retVal}" -ne 0 ]; then
-  print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
-  exit
-fi
+if [ -n "${BUILDER_CONFIG["PREPARED_IMAGE"]}" ]; then
+  use_prepared_image
+else
+  # run snap prepare image with all known parameters
+  image_build_command="snap prepare-image ${BUILDER_CONFIG["KERNEL_MISMATCH"]} ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["ASSERT"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
+  print_debug 1 "Running: ${image_build_command}"
+  run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
+  retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result")
+  rm -rf "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
+  if [ "${retVal}" -ne 0 ]; then
+    print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
+    exit
+  fi
 
-print_debug 2 "snap prepare-image completed with exit code (${retVal})"
+  print_debug 2 "snap prepare-image completed with exit code (${retVal})"
+fi
 
 BUILDER_CONFIG["GADGET_DIR"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget"
 BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
@@ -956,6 +1188,12 @@ BUILDER_CONFIG["GADGET_YAML"]="${BUILDER_CONFIG["GADGET_DIR"]}/meta/gadget.yaml"
 mv "${BUILDER_CONFIG["TMP_LOG_FILE"]}" "${BUILDER_CONFIG["WORK_DIR"]}/builder.log"
 # determine bootloader
 determine_bootloader
+
+# a disk image is not built out of the amba firmware images
+if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ] && [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ]; then
+  print_debug 0 "--build-disk-image is not supported on Ambarella amboot"
+  exit 1
+fi
 
 # updated seeded image per passed configurations
 # add build timestamp if provided
@@ -994,6 +1232,10 @@ if [ "${BUILDER_CONFIG["AMBOOT"]}" = "true" ] && \
   run_amba_image_build
 else
   copy_release_files
+fi
+
+if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ]; then
+  create_disk_images
 fi
 
 # create/copy image manifest

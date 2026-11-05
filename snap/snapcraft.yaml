@@ -17,6 +17,9 @@ environment:
   PATH:            $SNAP/usr/sbin:$SNAP/usr/bin:$SNAP/sbin:$SNAP/bin:$SNAP/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/bin:$SNAP/aarch64-linux-gnu/bin:$PATH
 #  LD_LIBRARY_PATH: $SNAP_LIBRARY_PATH:$LD_LIBRARY_PATH:$SNAP/lib:$SNAP/usr/lib:$SNAP/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}:$SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/android
   LANG:            C
+  # the tools run on the snap's libc, which cannot load the modules of a newer
+  # host, and mcopy needs one for a vfat image
+  GCONV_PATH:      $SNAP/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}/gconv
   PYTHONPATH:      $SNAP/usr/lib/python3/dist-packages
 
 layout:
@@ -52,6 +55,7 @@ parts:
       - mtools
       - squashfs-tools
       - dosfstools
+      - fdisk
       - gdisk
       - fakeroot
       - openssh-client
