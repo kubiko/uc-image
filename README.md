@@ -31,6 +31,8 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
 - `--prepared-image`         Build from what `snap prepare-image <model> <dir>` wrote, instead of running it. The model comes from the seed. The directory is copied, never written to.
 - `--allow-snapd-kernel-mismatch` Passed through to `snap prepare-image`, for a kernel snap which does not declare the snapd it needs.
 - `--build-disk-image`       Also build a whole disk image of each gadget volume, see below.
+- `--image-size`             Size of the whole disk images, implies `--build-disk-image`, see below.
+- `--sparse-disk-image`      Convert the whole disk images to sparse images, implies `--build-disk-image`, see below.
 - `--no-ab-support`          Switch off A/B slot support, see below.
 
 ## Bootloaders
@@ -40,6 +42,10 @@ Images are built for u-boot, lk and grub, which is what the gadget's `bootloader
 `--build-disk-image` builds `<volume>.img` for each gadget volume next to the partition images: the partition table and all content, at the offsets of `gadget.yaml`. It works for `gpt` and `mbr` volumes, skips `emmc` ones, which describe hardware partitions, and does not go with `--build-tar-seed`, `--build-dir-seed` or Ambarella amboot.
 
 As with ubuntu-image, `ubuntu-boot`, `ubuntu-save` and `ubuntu-data` get space on the disk but no partition, as the install creates them. An image with A/B slots has all of its partitions, as they are not created on the device.
+
+A disk image is as big as its content, plus 1 MiB or more for the backup GPT. `--image-size` makes it bigger, with the syntax of ubuntu-image: a size in bytes or with a `K`, `M` or `G` suffix, for all volumes, or per volume, by name or index in `gadget.yaml`, e.g. `--image-size 4G` or `--image-size pc:8G,1:512M`. A size with no volume is for the volumes not named, e.g. `--image-size 512M,pc:8G`. A size is rounded up to whole 4 KiB, and one smaller than the content needs is ignored, with a warning.
+
+`--sparse-disk-image` converts each disk image, once it is built, to a sparse image, as the partition images are, which is smaller to store and download, and which fastboot can flash. qemu and dd need a raw image, which `simg2img <volume>.img <volume>.raw` gives back.
 
 To run such an image in qemu, with UEFI for a grub gadget:
 ```

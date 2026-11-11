@@ -124,6 +124,18 @@ print_help () {
   echo " --build-disk-image        Also build a whole disk image of each gadget volume, as"
   echo "                           <volume>.img, with the partition table and all content,"
   echo "                           which qemu can boot or dd can write to a disk."
+  echo " --image-size SIZE         Size of the whole disk image, in bytes or with a K, M or G"
+  echo "                           suffix. Implies --build-disk-image. A size smaller than the"
+  echo "                           gadget needs is ignored, with a warning. For a gadget with"
+  echo "                           more volumes, SIZE is applied to all of them, or each gets"
+  echo "                           its own as <volume name or index>:<size>[,...]. A size with"
+  echo "                           no volume is then for the volumes not named."
+  echo "                           examples: --image-size 4G"
+  echo "                                     --image-size pc:8G,1:512M"
+  echo "                                     --image-size 512M,pc:8G"
+  echo " --sparse-disk-image       Convert the whole disk image, once it is built, to a sparse"
+  echo "                           image, which is smaller and fastboot can flash, but qemu"
+  echo "                           and dd cannot use. Implies --build-disk-image."
   echo " --no-ab-support           Switch off A/B slot support. A gadget with A/B slots is"
   echo "                           then refused."
   echo " --assert                  Include the assertion from the local file"
@@ -775,6 +787,66 @@ disk_structure_image () {
   [ ! -e "${image}" ] || echo "${image}"
 }
 
+# print the size --image-size asks for a volume, in bytes, nothing if none
+# - name and index of the volume
+requested_disk_size () {
+  local volume="${1}"
+  local index="${2}"
+  local entry all=""
+  local entries=()
+  IFS=',' read -r -a entries <<< "${BUILDER_CONFIG["IMAGE_SIZE"]}"
+  for entry in "${entries[@]}"
+  do
+    case "${entry}" in
+      ("${volume}":* | "${index}":*)
+        size_to_bytes "${entry#*:}"
+        return
+        ;;
+      (*:*)
+        ;;
+      (*)
+        # a size without a volume is for all the volumes not named
+        all="${entry}"
+        ;;
+    esac
+  done
+  [ -z "${all}" ] || size_to_bytes "${all}"
+}
+
+# warn about the volumes --image-size names, which the gadget does not have
+check_image_size_volumes () {
+  local entry volume
+  local entries=()
+  local volumes
+  volumes=$("${YQ}" eval '.volumes | keys | .[]' "${BUILDER_CONFIG["GADGET_YAML"]}")
+  IFS=',' read -r -a entries <<< "${BUILDER_CONFIG["IMAGE_SIZE"]}"
+  for entry in "${entries[@]}"
+  do
+    [[ "${entry}" == *:* ]] || continue
+    volume="${entry%%:*}"
+    if [[ "${volume}" =~ ^[0-9]+$ ]]; then
+      [ "${volume}" -lt "$(echo "${volumes}" | wc -l)" ] && continue
+    elif echo "${volumes}" | grep -qxF "${volume}"; then
+      continue
+    fi
+    print_debug 0 "\nWarning: --image-size names volume '${volume}', which the gadget does not have"
+  done
+}
+
+# convert a whole disk image to a sparse image, in place
+# - disk image
+sparse_disk_image () {
+  print_debug 1 "\nCreate sparse image of ${1##*/}"
+  print_debug 2 "img2simg ${1} ${1}.sparse"
+  if ! img2simg "${1}" "${1}.sparse" 2>&1 | tee -a "${BUILDER_CONFIG["WORK_DIR"]}/builder.log" \
+     || [ ! -s "${1}.sparse" ]; then
+    rm -f "${1}.sparse"
+    print_debug 0 "\nCannot create sparse image of ${1}, bailing out!!!"
+    exit 1
+  fi
+  mv "${1}.sparse" "${1}"
+}
+
 # create the whole disk image of a gadget volume
 #
 # Layout follows gadget.yaml the way snapd reads it: a structure with no offset
@@ -782,14 +854,16 @@ disk_structure_image () {
 # ubuntu-boot, ubuntu-save and ubuntu-data take space on the disk, but on a
 # system which is not A/B the install creates them, so they get no partition,
 # as with ubuntu-image.
-# - name of the volume
+# - name and index of the volume
 create_volume_disk_image () {
   local volume="${1}"
+  local volume_index="${2}"
   local disk="${BUILDER_CONFIG["OUTPUT_DIR"]}/${volume}.img"
   local table="${BUILDER_CONFIG["WORK_DIR"]}/${volume}.sfdisk"
   local writes=()
   local schema index=0 next=$((1024 * 1024)) end=0
   local name role type size offset image sfdisk_args=()
+  local disk_size requested_size
   print_debug 1 "\nCreating disk image of volume ${volume}"
   schema=$(vol=${volume} "${YQ}" eval '.volumes[strenv(vol)].schema // "gpt"' "${BUILDER_CONFIG["GADGET_YAML"]}")
   if [ "${schema}" = "mbr" ]; then
@@ -847,7 +921,20 @@ create_volume_disk_image () {
              "${BUILDER_CONFIG["GADGET_YAML"]}")
 
   # the backup GPT takes the end of the disk
-  truncate -s "$(((end / (1024 * 1024) + 2) * 1024 * 1024))" "${disk}"
+  disk_size=$(((end / (1024 * 1024) + 2) * 1024 * 1024))
+  requested_size="$(requested_disk_size "${volume}" "${volume_index}")"
+  if [ -n "${requested_size}" ]; then
+    # whole 4 KiB, a multiple of the sector size, and of what img2simg uses
+    requested_size=$(((requested_size + 4095) / 4096 * 4096))
+    if [ "${requested_size}" -lt "${disk_size}" ]; then
+      print_debug 0 "\nWarning: --image-size of ${volume} is ${requested_size} bytes, smaller than the ${disk_size} bytes it needs, which are used instead"
+    else
+      disk_size=${requested_size}
+    fi
+  fi
+  print_debug 2 "Disk image size of ${volume}: ${disk_size} bytes"
+  rm -f "${disk}"
+  truncate -s "${disk_size}" "${disk}"
   if [ -n "${BUILDER_CONFIG["SECTOR_SIZE"]}" ]; then
     sfdisk_args=(--sector-size "${BUILDER_CONFIG["SECTOR_SIZE"]}")
   fi
@@ -860,19 +947,26 @@ create_volume_disk_image () {
   do
     write_to_disk_image "${disk}" "${image%|*}" "${image##*|}"
   done
+  if [ "${BUILDER_CONFIG["SPARSE_DISK_IMAGE"]}" = "true" ]; then
+    sparse_disk_image "${disk}"
+  fi
 }
 
 # create a whole disk image for each gadget volume
 create_disk_images () {
   local volume
+  # volumes are indexed as in gadget.yaml, as with ubuntu-image
+  local index=-1
+  check_image_size_volumes
   for volume in $("${YQ}" eval '.volumes | keys | .[]' "${BUILDER_CONFIG["GADGET_YAML"]}")
   do
+    index=$((index + 1))
     # the hardware boot partitions of an eMMC are not on a disk
     if [ "$(vol=${volume} "${YQ}" eval '.volumes[strenv(vol)].schema' "${BUILDER_CONFIG["GADGET_YAML"]}")" = "emmc" ]; then
       print_debug 1 "\nSkipping disk image of eMMC hardware volume ${volume}"
       continue
     fi
-    create_volume_disk_image "${volume}"
+    create_volume_disk_image "${volume}" "${index}"
   done
 }
 
@@ -1120,6 +1214,24 @@ while [ "$1" != "" ]; do
     --build-disk-image)
       BUILDER_CONFIG["BUILD_DISK_IMAGE"]="true"
       ;;
+    --image-size=* | --image-size)
+      if [ "${1}" = "--image-size" ]; then
+        image_size="${2}"
+        shift
+      else
+        image_size="${1#*=}"
+      fi
+      if [[ ! "${image_size}" =~ ^([^,:]+:)?[0-9]+[KkMmGg]?(,([^,:]+:)?[0-9]+[KkMmGg]?)*$ ]]; then
+        print_debug 0 "wrong image size [ ${image_size} ], it is [<volume>:]<size>[,[<volume>:]<size>...], with a K, M or G suffix if any"
+        exit 1
+      fi
+      BUILDER_CONFIG["IMAGE_SIZE"]="${image_size}"
+      BUILDER_CONFIG["BUILD_DISK_IMAGE"]="true"
+      ;;
+    --sparse-disk-image)
+      BUILDER_CONFIG["SPARSE_DISK_IMAGE"]="true"
+      BUILDER_CONFIG["BUILD_DISK_IMAGE"]="true"
+      ;;
     --no-ab-support)
       BUILDER_CONFIG["AB_SUPPORT"]="off"
       ;;
@@ -1177,7 +1289,7 @@ fi
 # a disk image needs the file system image of the seed
 if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ] && \
    { [ "${BUILDER_CONFIG["BUILD_TAR_SEED"]}" = "true" ] || [ "${BUILDER_CONFIG["BUILD_DIR_SEED"]}" = "true" ]; }; then
-  print_debug 0 "--build-disk-image needs a seed image, it does not go with tar or directory seeds"
+  print_debug 0 "a whole disk image (--build-disk-image, --image-size, --sparse-disk-image) needs a seed image, it does not go with tar or directory seeds"
   exit 1
 fi
 
