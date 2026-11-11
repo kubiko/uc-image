@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the the GNU General Public License version 3, as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranties of
+# MERCHANTABILITY, SATISFACTORY QUALITY or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the applicable version of the GNU General Public
+# License for more details.
+#.
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Copyright (C) 2024 Canonical, Ltd.
+
+# The part of a preseeded build which runs as root: 'snap prepare-image
+# --preseed', which mounts the snaps and chroots into them, nothing else.
+# uc-image runs it, with sudo if it is not root, and does the rest of the build
+# as the user.
+#
+# It prepares the image into a target directory the user made, which is an
+# empty directory and no link, and when done, failed or not, gives what is in
+# it to the owner of the directory. The 'snap prepare-image' options it takes
+# are the ones uc-image passes, it adds --preseed and --write-revisions itself.
+#
+# It checks for mistakes, it is no security boundary: preseeding runs the snapd
+# of the image as root, which can be a local snap. Whoever may run it as root
+# may run anything as root.
+#
+# usage: uc-image.preseed-stage [prepare-image options] <model> <target-dir>
+
+print_error () {
+  echo "uc-image.preseed-stage: $*" >&2
+}
+
+if [ "${EUID}" -ne 0 ]; then
+  print_error "it runs 'snap prepare-image --preseed', which needs root, run it with sudo"
+  exit 1
+fi
+
+args=()
+while [ "$#" -gt 2 ]; do
+  case "${1}" in
+    (--channel=* | --snap=* | --revisions=* | --validation=* | --preseed-sign-key=* | --sysfs-overlay=* | --assert=* | --allow-snapd-kernel-mismatch)
+      args+=("${1}")
+      ;;
+    (*)
+      print_error "unsupported option '${1}'"
+      exit 1
+      ;;
+  esac
+  shift
+done
+if [ "$#" -ne 2 ]; then
+  print_error "usage: uc-image.preseed-stage [prepare-image options] <model> <target-dir>"
+  exit 1
+fi
+model="${1}"
+target="${2}"
+
+if [ ! -f "${model}" ]; then
+  print_error "no model assertion [${model}]"
+  exit 1
+fi
+if [ -L "${target}" ] || [ ! -d "${target}" ]; then
+  print_error "[${target}] is no directory"
+  exit 1
+fi
+target="$(readlink -f "${target}")"
+if [ "${target}" = "/" ] || [ -n "$(ls -A "${target}")" ]; then
+  print_error "[${target}] is not empty, the image is prepared into a new directory"
+  exit 1
+fi
+owner="$(stat -c '%u:%g' "${target}")"
+
+# give the result to the owner, a failed run included, so it can remove it. Not
+# into other file systems, which a run cut short could leave mounted.
+give_back () {
+  [ "${owner}" = "0:0" ] && return
+  find "${target}" -xdev -exec chown --no-dereference "${owner}" {} +
+}
+trap give_back EXIT
+
+snap prepare-image --preseed "${args[@]}" \
+  --write-revisions="${target}/ubuntu-core-image.revisions" \
+  "${model}" "${target}"

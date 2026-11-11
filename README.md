@@ -14,7 +14,7 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
                              Examples: `--snap go=1.14|stable`
                                       `--snap avahi.snap`
 - `--revisions`              Specify a subuntu-core-image.revisions file referencing the exact revisions of the provided snaps which should be installed. `ubuntu-core-image.manifest` and `ubuntu-core-image.revisions` are auto-generated for each build in the `manifest/` subdirectory of the output directory.
-- `--preseed`                Create pressed image. The tool has to run as root.
+- `--preseed`                Create preseeded image. Only `snap prepare-image --preseed` runs as root, with sudo, see below.
 - `--preseed-sign-key`       Name of the key to use to sign preseed assertion.
 - `--validation`             Control of the validation sets, choose 'ignore' or 'enforce'.
 - `--preseed-sysfs-overlay`  Overlay of sysfs to be used when building presseded image. This is required when building images with specific hw interfaces.
@@ -28,12 +28,25 @@ This is command line tool for building Ubuntu Core images. It does follow ubuntu
 - `-v`, `--version`          Pring version info
 - `--disk-info`              File to be used as .disk/info on the image's rootfs. This file can contain useful information about the target image, like image identification data, system name, build timestamp, etc.
 
-- `--prepared-image`         Build from what `snap prepare-image <model> <dir>` wrote, instead of running it. The model comes from the seed. The directory is copied, never written to.
+- `--prepared-image`         Build from what `snap prepare-image <model> <dir>` wrote, instead of running it. The model comes from the seed. The directory is copied, never written to. It does not go with `--preseed`, a prepared image is preseeded when it is prepared.
 - `--allow-snapd-kernel-mismatch` Passed through to `snap prepare-image`, for a kernel snap which does not declare the snapd it needs.
 - `--build-disk-image`       Also build a whole disk image of each gadget volume, see below.
 - `--image-size`             Size of the whole disk images, implies `--build-disk-image`, see below.
 - `--sparse-disk-image`      Convert the whole disk images to sparse images, implies `--build-disk-image`, see below.
 - `--no-ab-support`          Switch off A/B slot support, see below.
+
+## Preseeded images and root
+`snap prepare-image --preseed` mounts the snaps and chroots into them, so it needs root. That is the only part of the build which runs as root: uc-image runs it with sudo, as `uc-image.preseed-stage`, which prepares the image into the work directory and gives it back to the user. The rest of the build runs as the user and uses the work directory as it is, nothing is copied, so the user owns all it creates, as with an image which is not preseeded. `fakeroot` makes the files root's in the file system images.
+
+Started with sudo, `sudo uc-image --preseed ...`, the build goes on as the user who ran sudo once the image is prepared, and one which does not preseed runs as that user from the start.
+
+For no password to be asked, allow the root part in `/etc/sudoers`, with `visudo`:
+```
+<user> ALL=(root) NOPASSWD: /snap/bin/uc-image.preseed-stage
+```
+This is no security boundary: preseeding runs the snapd of the image as root, which can be a local snap, so whoever may run it may run anything as root. `--preseed-sign-key` takes the key from root's keyring, `/root/.snap/gnupg`, as before.
+
+Output and work directories which a build as root left are not removed, uc-image asks to remove them with sudo.
 
 ## Bootloaders
 Images are built for u-boot, lk and grub, which is what the gadget's `bootloader` says.

@@ -31,6 +31,10 @@ layout:
 apps:
   uc-image:
     command: usr/bin/uc-image
+  # the root part of a preseeded build, which uc-image runs with sudo, an app
+  # so sudo sets up the snap environment
+  preseed-stage:
+    command: usr/bin/uc-image-preseed-stage
 
 parts:
   tools:

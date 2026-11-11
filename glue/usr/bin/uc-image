@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=7.7.0
+SCRIPT_VERSION=8.0.0
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -33,7 +33,19 @@ BUILDER_CONFIG["VALIDATION"]="ignore"
 BUILDER_CONFIG["AB_SUPPORT"]="${UC_IMAGE_AB_SUPPORT:-on}"
 
 # A/B slot support is a module of its own, see the file
-AB_MODULE="$(dirname "$(${READLINK} -f "${BASH_SOURCE[0]}")")/../lib/uc-image/ab-slots.sh"
+SCRIPT="$(${READLINK} -f "${BASH_SOURCE[0]}")"
+AB_MODULE="$(dirname "${SCRIPT}")/../lib/uc-image/ab-slots.sh"
+
+# the arguments, for a build started with sudo, which goes on as the user
+ORIG_ARGS=("$@")
+# the snaps to pass to 'snap prepare-image'
+PREPARE_SNAPS=()
+
+# a build started with sudo goes on as the user, see continue_as_user, with the
+# log so far and, if preseeded, the work directory prepared as root
+BUILDER_CONFIG["PREPARED_AS_ROOT"]="${UC_IMAGE_INTERNAL_PREPARED}"
+BUILDER_CONFIG["INHERITED_LOG_FILE"]="${UC_IMAGE_INTERNAL_LOG_FILE}"
+unset UC_IMAGE_INTERNAL_PREPARED UC_IMAGE_INTERNAL_LOG_FILE
 
 # special files to be copied from gadget snap if any exists
 # they are typically not mapped to any partition, so won't be picked based on
@@ -49,9 +61,14 @@ AB_MODULE="$(dirname "$(${READLINK} -f "${BASH_SOURCE[0]}")")/../lib/uc-image/ab
 # genio-flash)
 BUILDER_CONFIG["SPECIAL_GADGET_ASSETS"]="uc.lst gpt*.bin prog*_firehose*.* flashall rawprogram*.xml patch*.xml sbc_1.0_8016.bin u-boot-signed*.imx imx-boot.* bst_release.bin.signed reflash-system.sh flash-uc.sh Flash_Writer_* fip- bl2_* ubuntu.json lk.bin u-boot-initial-env MBR_EMMC_UBUNTU MBR_UFS"
 
-# delete all logs
-rm -rf "$(dirname "$(mktemp -u -t uc-image-builder-XXXX)")"/uc-image-builder-* 2> /dev/null
-BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
+if [ -n "${BUILDER_CONFIG["INHERITED_LOG_FILE"]}" ]; then
+  BUILDER_CONFIG["TMP_LOG_FILE"]="${BUILDER_CONFIG["INHERITED_LOG_FILE"]}"
+else
+  # delete old logs, of this user only, the ones of others can be in use
+  find "$(dirname "$(mktemp -u -t uc-image-builder-XXXX)")" -maxdepth 1 -name 'uc-image-builder-*' \
+       -user "$(id -u)" -delete 2> /dev/null
+  BUILDER_CONFIG["TMP_LOG_FILE"]="$(mktemp -t uc-image-builder-XXXX)"
+fi
 [ -z "${BUILDER_CONFIG["DEBUG_LEVEL"]}" ] && BUILDER_CONFIG["DEBUG_LEVEL"]=1
 
 # boot assets candidate directories in gadget snap
@@ -90,7 +107,10 @@ print_help () {
   echo "  --allow-snapd-kernel-mismatch"
   echo "                           Passed through to 'snap prepare-image', for a kernel snap"
   echo "                           which does not declare the snapd it needs."
-  echo "  --preseed                Pressed the image."
+  echo "  --preseed                Preseed the image. This needs root for 'snap prepare-image"
+  echo "                           --preseed' only, which runs with sudo, the rest of the build"
+  echo "                           runs as the user, who owns what it creates. Started with"
+  echo "                           sudo, it goes on as the user who ran sudo, too."
   echo "  --preseed-sign-key       Name of the key to use to sign preseed assertion, otherwise use the default key"
   echo "  --validation             Control of the validation sets, choose 'ignore' or 'enforce', default: '${BUILDER_CONFIG["VALIDATION"]}'"
   echo "  --sector-size SECTOR-SIZE"
@@ -186,23 +206,59 @@ normalize_version () {
 
 # check snaps interfaces are connected before progressing
 check_snap_environment () {
+  # preseeding needs root for one step, which sudo gives
+  if [ -n "${BUILDER_CONFIG["PRESEED"]}" ] && [ "${EUID}" -ne 0 ] && ! command -v sudo > /dev/null; then
+    print_debug 0 "Preseeding needs root for 'snap prepare-image --preseed', and there is no sudo, run as root"
+    exit 1
+  fi
+
   # are we even running in snap confinement
   if !  env | grep -q  "SNAP_INSTANCE_NAME"; then
     echo "Detected non snap environment execution (running unconfined)"
     return
   fi
 
-  # check we are not running as root
-  if [ "$USER" =  "root" ] && [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
-    echo "Please do not run with sudo, no need for this"
+  # a build started with sudo runs as the user, this is root itself
+  if [ "${EUID}" -eq 0 ] && [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
+    echo "Running as root, there is no need for this"
   fi
+}
 
-  # if we are preseeding, we need to run as root
-  if [ "$USER" !=  "root" ] && [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
-    echo "Please run with sudo, preseeding requires mounting."
-    exit 0
+# run a command as the user who started the build with sudo, or as is
+run_as_user () {
+  if [ -n "${BUILDER_CONFIG["RUN_AS"]}" ]; then
+    setpriv --reuid="${BUILDER_CONFIG["RUN_AS"]%%:*}" --regid="${BUILDER_CONFIG["RUN_AS"]##*:}" --init-groups -- "$@"
+  else
+    "$@"
   fi
+}
 
+# go on with a build started with sudo as the user who ran sudo, with the
+# same arguments, the log so far, and the work directory, if prepared as root
+continue_as_user () {
+  local uid="${BUILDER_CONFIG["RUN_AS"]%%:*}"
+  local gid="${BUILDER_CONFIG["RUN_AS"]##*:}"
+  local user home
+  user="$(getent passwd "${uid}" | cut -d: -f1)"
+  home="$(getent passwd "${uid}" | cut -d: -f6)"
+  print_debug 1 "Going on as ${user:-${uid}}"
+  [ ! -e "${BUILDER_CONFIG["TMP_LOG_FILE"]}" ] || chown "${uid}:${gid}" "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
+  exec setpriv --reuid="${uid}" --regid="${gid}" --init-groups -- \
+    env -u SUDO_UID -u SUDO_GID -u SUDO_USER -u SUDO_COMMAND \
+      HOME="${home:-${HOME}}" USER="${user:-${uid}}" LOGNAME="${user:-${uid}}" \
+      UC_IMAGE_INTERNAL_LOG_FILE="${BUILDER_CONFIG["TMP_LOG_FILE"]}" \
+      UC_IMAGE_INTERNAL_PREPARED="${1}" \
+      "${SCRIPT}" "${ORIG_ARGS[@]}"
+}
+
+# print the command which runs the root part of a preseeded build, a snap app,
+# for sudo to set up the snap environment
+preseed_stage_command () {
+  if [ -n "${SNAP_INSTANCE_NAME}" ]; then
+    echo "/snap/bin/${SNAP_INSTANCE_NAME}.preseed-stage"
+  else
+    echo "$(dirname "${SCRIPT}")/uc-image-preseed-stage"
+  fi
 }
 
 # print debug log
@@ -230,23 +286,44 @@ print_builder_config () {
   fi
 }
 
-# prepare work directory
+# the output directory is removed when the image is done, find early if it
+# cannot be, as with one a build as root left, not after the root part
+check_output_directory () {
+  local uid="${BUILDER_CONFIG["RUN_AS"]%%:*}"
+  [ -n "${uid}" ] || uid="$(id -u)"
+  [ "${uid}" -ne 0 ] && [ -d "${BUILDER_CONFIG["OUTPUT_DIR"]}" ] || return 0
+  if [ -n "$(find "${BUILDER_CONFIG["OUTPUT_DIR"]}" ! -user "${uid}" -print -quit 2> /dev/null)" ]; then
+    print_debug 0 "The output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}] has files of other users, which it cannot remove, if a build as root left them, remove them with sudo"
+    exit 1
+  fi
+}
+
+# prepare work directory, as the user, even in a build started with sudo
 prepare_work_directory () {
-  # first clean previus tmp directories
-  rm -rf "$(dirname "$(mktemp -u -d -t uc-i-workdir-XXXXX)")"/uc-i-workdir-*
+  local uid="${BUILDER_CONFIG["RUN_AS"]%%:*}"
+  [ -n "${uid}" ] || uid="$(id -u)"
+  # first clean previus tmp directories, of this user only
+  run_as_user find "$(dirname "$(mktemp -u -d -t uc-i-workdir-XXXXX)")" -maxdepth 1 -name 'uc-i-workdir-*' \
+              -user "${uid}" -exec rm -rf {} + 2> /dev/null
   # if work directory is not defined, use tmp one
   if [ -z "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
     # work dir not defined create tmp one
-    BUILDER_CONFIG["WORK_DIR"]=$(mktemp -d -t uc-i-workdir-XXXX)
-    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}"
+    BUILDER_CONFIG["WORK_DIR"]=$(run_as_user mktemp -d -t uc-i-workdir-XXXX)
     print_debug 2 "Creating temp work directory: ${BUILDER_CONFIG["WORK_DIR"]}"
   else
     # make sure dir exists
     if [ -d "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
         print_debug 2 "Cleaning old build directory [${BUILDER_CONFIG["WORK_DIR"]}]"
-        rm -rf "${BUILDER_CONFIG["WORK_DIR"]}"
+        if ! run_as_user rm -rf "${BUILDER_CONFIG["WORK_DIR"]}"; then
+          print_debug 0 "Cannot remove the work directory [${BUILDER_CONFIG["WORK_DIR"]}], if a build as root left it, remove it with sudo"
+          exit 1
+        fi
     fi
-    mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}"
+    run_as_user mkdir -p "${BUILDER_CONFIG["WORK_DIR"]}"
+  fi
+  if [ ! -d "${BUILDER_CONFIG["WORK_DIR"]}" ]; then
+    print_debug 0 "Cannot create the work directory [${BUILDER_CONFIG["WORK_DIR"]}]"
+    exit 1
   fi
 }
 
@@ -1066,12 +1143,35 @@ generate_manifest () {
   fi
 }
 
-run_snap_prepare_image() {
-  # set default exit code as fail before running snap prepare-image
-  echo 2 > "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
-  eval "${*}"
-  retValue=$?
-  echo ${retValue} > "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
+# run 'snap prepare-image' with all known parameters, into the work directory
+# preseeding needs root, so it is the root part of the build, which runs with
+# sudo, unless this is root already, and gives the work directory back
+run_prepare_image () {
+  local args=() command=() key ret
+  for key in KERNEL_MISMATCH CHANNEL REVISIONS PRESEED-KEY ASSERT PRESEED-SYSFS-OVERLAY
+  do
+    [ -z "${BUILDER_CONFIG[${key}]}" ] || args+=("${BUILDER_CONFIG[${key}]}")
+  done
+  args+=("--validation=${BUILDER_CONFIG["VALIDATION"]}" "${PREPARE_SNAPS[@]}")
+  if [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
+    command=(snap prepare-image "${args[@]}" "--write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions")
+  else
+    # it adds --preseed and --write-revisions
+    command=("$(preseed_stage_command)" "${args[@]}")
+    if [ "${EUID}" -ne 0 ]; then
+      print_debug 1 "Preseeding needs root for 'snap prepare-image --preseed' only, running it with sudo"
+      command=(sudo "${command[@]}")
+    fi
+  fi
+  command+=("${BUILDER_CONFIG["MODEL_ASSERTION"]}" "${BUILDER_CONFIG["WORK_DIR"]}")
+  print_debug 1 "Running: ${command[*]}"
+  "${command[@]}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
+  ret="${PIPESTATUS[0]}"
+  if [ "${ret}" -ne 0 ]; then
+    print_debug 0 "snap prepare-image failed with (${ret}), bailing out"
+    exit 1
+  fi
+  print_debug 2 "snap prepare-image completed with exit code (${ret})"
 }
 
 # copy the prepared image directory into the work directory, which is changed
@@ -1091,15 +1191,15 @@ BUILDER_CONFIG["ARGS"]="${*}"
 while [ "$1" != "" ]; do
   case $1 in
     -c | --channel)
-      BUILDER_CONFIG["CHANNEL"]="--channel ${2}"
+      BUILDER_CONFIG["CHANNEL"]="--channel=${2}"
       shift
       ;;
     --snap=*)
       EX_SNAP=$(echo "${1}" | awk -F= '{print $2}')
-      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap "${EX_SNAP}")"
+      PREPARE_SNAPS+=("--snap=$(validate_snap "${EX_SNAP}")")
       ;;
     --snap)
-      BUILDER_CONFIG["SNAPS"]="${BUILDER_CONFIG["SNAPS"]} --snap=$(validate_snap "${2}")"
+      PREPARE_SNAPS+=("--snap=$(validate_snap "${2}")")
       shift
       ;;
     --revisions)
@@ -1116,11 +1216,11 @@ while [ "$1" != "" ]; do
       BUILDER_CONFIG["PRESEED"]="--preseed"
       ;;
     --preseed-sign-key)
-      BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key ${2}"
+      BUILDER_CONFIG["PRESEED-KEY"]="--preseed-sign-key=${2}"
       shift
       ;;
     --preseed-sysfs-overlay | --sysfs-overlay)
-      BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay ${2}"
+      BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]="--sysfs-overlay=$(${READLINK} -f "${2}")"
       shift
       ;;
     --validation)
@@ -1164,7 +1264,7 @@ while [ "$1" != "" ]; do
     --assert)
       f=$(validate_file "${2}")
       if [ -n "${f}" ]; then
-        BUILDER_CONFIG["ASSERT"]="${f}"
+        BUILDER_CONFIG["ASSERT"]="--assert=${f}"
       else
         print_debug 0 "wrong assertion file to add [ ${2} ]"
         exit
@@ -1280,10 +1380,16 @@ if [ -n "${BUILDER_CONFIG["SNAPD_RECOVERY_MODE"]}" ] && [ -z "${BUILDER_CONFIG["
   BUILDER_CONFIG["BUILD_DIR_SEED"]="true"
 fi
 
-# if we are trying to preseed, this cannot be realistically run in strict confinement
-if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
-  # we run as real root
-  BUILDER_CONFIG["FAKEROOT"]=""
+# a build started with sudo runs as the user who ran sudo, but for 'snap
+# prepare-image --preseed', so what it creates is theirs. The files of a
+# preseeded work directory are given to the user too, and fakeroot makes them
+# root's in the file system images, as with any other build.
+if [ "${EUID}" -eq 0 ] && [ -n "${SUDO_UID}" ] && [ "${SUDO_UID}" != "0" ]; then
+  BUILDER_CONFIG["RUN_AS"]="${SUDO_UID}:${SUDO_GID:-${SUDO_UID}}"
+  if [ -z "${BUILDER_CONFIG["PRESEED"]}" ]; then
+    print_debug 1 "Started with sudo, which only preseeding needs"
+    continue_as_user ""
+  fi
 fi
 
 # a disk image needs the file system image of the seed
@@ -1296,6 +1402,10 @@ fi
 if [ -n "${BUILDER_CONFIG["PREPARED_IMAGE"]}" ]; then
   if [ -n "${BUILDER_CONFIG["MODEL_ASSERTION"]}" ]; then
     print_debug 0 "--prepared-image brings its model along, do not pass model_assertion"
+    exit 1
+  fi
+  if [ -n "${BUILDER_CONFIG["PRESEED"]}" ]; then
+    print_debug 0 "--preseed is for 'snap prepare-image', a prepared image is preseeded when it is prepared"
     exit 1
   fi
   # this directory is removed before a build starts
@@ -1324,29 +1434,31 @@ BUILDER_CONFIG["MANIFEST_DIR"]="${BUILDER_CONFIG["OUTPUT_DIR"]}/manifest"
 # check we have all the permissions
 check_snap_environment
 
-# first create or clean work directory
-prepare_work_directory
+# first create or clean work directory, unless the root part of a build started
+# with sudo prepared it
+check_output_directory
+
+if [ -n "${BUILDER_CONFIG["PREPARED_AS_ROOT"]}" ]; then
+  if [ ! -d "${BUILDER_CONFIG["PREPARED_AS_ROOT"]}" ] || [ ! -O "${BUILDER_CONFIG["PREPARED_AS_ROOT"]}" ]; then
+    print_debug 0 "The work directory [${BUILDER_CONFIG["PREPARED_AS_ROOT"]}] is not this user's, bailing out"
+    exit 1
+  fi
+  BUILDER_CONFIG["WORK_DIR"]="${BUILDER_CONFIG["PREPARED_AS_ROOT"]}"
+else
+  prepare_work_directory
+fi
 
 print_builder_config
 
-# always export snap revision manifest
-BUILDER_CONFIG["REVISIONS"]="${BUILDER_CONFIG["REVISIONS"]} --write-revisions=${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions"
-
 if [ -n "${BUILDER_CONFIG["PREPARED_IMAGE"]}" ]; then
   use_prepared_image
+elif [ -n "${BUILDER_CONFIG["PREPARED_AS_ROOT"]}" ]; then
+  print_debug 1 "Using the work directory prepared as root: [${BUILDER_CONFIG["WORK_DIR"]}]"
 else
-  # run snap prepare image with all known parameters
-  image_build_command="snap prepare-image ${BUILDER_CONFIG["KERNEL_MISMATCH"]} ${BUILDER_CONFIG["CHANNEL"]} --validation=${BUILDER_CONFIG["VALIDATION"]} ${BUILDER_CONFIG["REVISIONS"]} ${BUILDER_CONFIG["PRESEED"]} ${BUILDER_CONFIG["PRESEED-KEY"]} ${BUILDER_CONFIG["ASSERT"]} ${BUILDER_CONFIG["PRESEED-SYSFS-OVERLAY"]} ${BUILDER_CONFIG["SNAPS"]} ${BUILDER_CONFIG["MODEL_ASSERTION"]} ${BUILDER_CONFIG["WORK_DIR"]}"
-  print_debug 1 "Running: ${image_build_command}"
-  run_snap_prepare_image "${image_build_command}" 2>&1 | tee -a "${BUILDER_CONFIG["TMP_LOG_FILE"]}"
-  retVal=$(cat "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result")
-  rm -rf "${BUILDER_CONFIG["WORK_DIR"]}.snap_prepare_result"
-  if [ "${retVal}" -ne 0 ]; then
-    print_debug 0 "snap prepare-image failed with (${retVal}), bailing out"
-    exit
-  fi
-
-  print_debug 2 "snap prepare-image completed with exit code (${retVal})"
+  run_prepare_image
+  # the root part of a build started with sudo is done, the work directory is
+  # the user's now, and is used as it is, nothing is copied
+  [ -z "${BUILDER_CONFIG["RUN_AS"]}" ] || continue_as_user "${BUILDER_CONFIG["WORK_DIR"]}"
 fi
 
 BUILDER_CONFIG["GADGET_DIR"]="${BUILDER_CONFIG["WORK_DIR"]}/gadget"
@@ -1377,7 +1489,10 @@ update_snapd_recovery_mode
 # prepare output directory
 if [ -d "${BUILDER_CONFIG["OUTPUT_DIR"]}" ]; then
     print_debug 2 "Cleaning output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}]"
-    rm -rf "${BUILDER_CONFIG["OUTPUT_DIR"]}"
+    if ! rm -rf "${BUILDER_CONFIG["OUTPUT_DIR"]}"; then
+      print_debug 0 "Cannot remove the output directory [${BUILDER_CONFIG["OUTPUT_DIR"]}], if a build as root left it, remove it with sudo"
+      exit 1
+    fi
 fi
 
 mkdir -p "${BUILDER_CONFIG["OUTPUT_DIR"]}"
