@@ -45,6 +45,51 @@ ab_check_image () {
     print_debug 0 "'snap prepare-image' wrote no [ubuntu-boot-state.img] for the gadget's system-boot-state structure, bailing out"
     exit 1
   fi
+  ab_check_device_config
+}
+
+# warn when the gadget's device-config misses what its kernel-module-load plug
+# asks for. A device-config makes the boot a single pass: the initrd links its
+# files into /run before the first coldplug, which then loads every driver, so
+# a module the plug denies and device-config does not blacklist loads anyway,
+# and nothing unloads it later. A device-config with no files is valid, to have
+# the kernel snap's modules from the initrd on; it is checked all the same. A
+# gadget without device-config boots in two passes, and is not checked.
+ab_check_device_config () {
+  print_debug 3 "ab_check_device_config"
+  local etc="${BUILDER_CONFIG["GADGET_DIR"]}/device-config/etc"
+  local snap_yaml="${BUILDER_CONFIG["GADGET_DIR"]}/meta/snap.yaml"
+  local entry name load options key
+  local -a modprobe modules_load missing
+  [ -d "${BUILDER_CONFIG["GADGET_DIR"]}/device-config" ] || return 0
+  [ -r "${snap_yaml}" ] || return 0
+  # what device-config holds, with '-' read as '_' as modprobe does
+  mapfile -t modprobe < <(cat "${etc}"/modprobe.d/*.conf 2> /dev/null | sed -e 's/#.*//' | awk 'NF { gsub(/-/, "_", $2); $1 = $1; print }')
+  mapfile -t modules_load < <(cat "${etc}"/modules-load.d/*.conf 2> /dev/null | sed -e 's/[#;].*//' | awk 'NF { gsub(/-/, "_", $1); print $1 }')
+  while IFS='|' read -r name load options
+  do
+    [ -n "${name}" ] || continue
+    key="${name//-/_}"
+    case "${load}" in
+      (denied)
+        printf '%s\n' "${modprobe[@]}" | grep -q -x "blacklist ${key}" \
+          || missing+=("blacklist ${name}|modprobe.d")
+        ;;
+      (on-boot)
+        printf '%s\n' "${modules_load[@]}" | grep -q -x -F "${key}" \
+          || missing+=("${name}|modules-load.d")
+        ;;
+    esac
+    if [ -n "${options}" ] && [ "${options}" != "*" ] && [ "${load}" != "denied" ]; then
+      options="$(printf '%s' "${options}" | tr -s '[:space:]' ' ')"
+      printf '%s\n' "${modprobe[@]}" | grep -q -x -F "options ${key} ${options}" \
+        || missing+=("options ${name} ${options}|modprobe.d")
+    fi
+  done < <("${YQ}" eval '.plugs // {} | to_entries | .[] | select(.key == "kernel-module-load" or .value.interface == "kernel-module-load") | .value.modules // [] | .[] | (.name // "") + "|" + (.load // "") + "|" + (.options // "")' "${snap_yaml}" 2> /dev/null)
+  for entry in "${missing[@]}"
+  do
+    print_debug 0 "\nWarning: the gadget's kernel-module-load plug asks for [${entry%|*}], which its device-config/etc/${entry#*|} does not hold, and the first coldplug of a single pass boot loads the drivers before the plug applies"
+  done
 }
 
 # create what the main script does not for a gadget with the slots
