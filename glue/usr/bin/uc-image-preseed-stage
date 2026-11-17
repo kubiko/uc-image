@@ -75,13 +75,58 @@ if [ "${target}" = "/" ] || [ -n "$(ls -A "${target}")" ]; then
 fi
 owner="$(stat -c '%u:%g' "${target}")"
 
+# 'snap prepare-image' signs the preseed assertion with gpg, as root, in the
+# keyring snapd picks: SNAP_GNUPG_HOME, or ~/.snap/gnupg of the user who ran
+# sudo. gpg starts a gpg-agent of root's for it, which outlives the run, and
+# leaves its sockets, root's, in that keyring.
+gnupg_home () {
+  local home=""
+  if [ -n "${SNAP_GNUPG_HOME}" ]; then
+    echo "${SNAP_GNUPG_HOME}"
+    return
+  fi
+  if [ -n "${SUDO_USER}" ]; then
+    home="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
+  fi
+  echo "${home:-$(getent passwd 0 | cut -d: -f6)}/.snap/gnupg"
+}
+
+# whether a gpg-agent of root's serves the keyring, without starting one.
+# gpg-connect-agent succeeds also when there is none, only an agent tells its pid
+gpg_agent_running () {
+  command -v gpg-connect-agent > /dev/null \
+    && gpg-connect-agent --homedir "${gnupg_home}" --no-autostart 'GETINFO pid' /bye 2> /dev/null \
+         | grep -q '^D [0-9]'
+}
+
+gnupg_home="$(gnupg_home)"
+# an agent of root's in root's own keyring may be root's to keep, one in a
+# user's keyring is what an earlier preseeded build left
+keep_gpg_agent=""
+if gpg_agent_running && [ "$(stat -c '%u' "${gnupg_home}" 2> /dev/null)" = "0" ]; then
+  keep_gpg_agent="true"
+fi
+
+# stop the gpg-agent the signing started, a failed run included
+stop_gpg_agent () {
+  [ -z "${keep_gpg_agent}" ] && gpg_agent_running || return 0
+  echo "uc-image.preseed-stage: stopping the gpg-agent the signing of the preseed assertion started for [${gnupg_home}]"
+  gpgconf --homedir "${gnupg_home}" --kill gpg-agent \
+    || print_error "cannot stop the gpg-agent for [${gnupg_home}], stop it with 'sudo gpgconf --homedir ${gnupg_home} --kill gpg-agent'"
+}
+
 # give the result to the owner, a failed run included, so it can remove it. Not
 # into other file systems, which a run cut short could leave mounted.
 give_back () {
   [ "${owner}" = "0:0" ] && return
   find "${target}" -xdev -exec chown --no-dereference "${owner}" {} +
 }
-trap give_back EXIT
+
+on_exit () {
+  stop_gpg_agent
+  give_back
+}
+trap on_exit EXIT
 
 snap prepare-image --preseed "${args[@]}" \
   --write-revisions="${target}/ubuntu-core-image.revisions" \
