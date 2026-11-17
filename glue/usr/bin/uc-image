@@ -16,7 +16,7 @@
 # Copyright (C) 2024 Canonical, Ltd.
 
 # this can be used to validate if there is newer version available
-SCRIPT_VERSION=8.0.0
+SCRIPT_VERSION=8.0.1
 
 unset BUILDER_CONFIG
 declare -A BUILDER_CONFIG
@@ -40,6 +40,9 @@ AB_MODULE="$(dirname "${SCRIPT}")/../lib/uc-image/ab-slots.sh"
 ORIG_ARGS=("$@")
 # the snaps to pass to 'snap prepare-image'
 PREPARE_SNAPS=()
+# files of the output directory which the disk images hold, and those to keep
+DISK_PARTITION_FILES=()
+DISK_KEEP_FILES=()
 
 # a build started with sudo goes on as the user, see continue_as_user, with the
 # log so far and, if preseeded, the work directory prepared as root
@@ -143,7 +146,9 @@ print_help () {
   echo " --build-raw               Build raw images, instead of sparse ones"
   echo " --build-disk-image        Also build a whole disk image of each gadget volume, as"
   echo "                           <volume>.img, with the partition table and all content,"
-  echo "                           which qemu can boot or dd can write to a disk."
+  echo "                           which qemu can boot or dd can write to a disk. The"
+  echo "                           partition images it holds are removed from the output"
+  echo "                           directory."
   echo " --image-size SIZE         Size of the whole disk image, in bytes or with a K, M or G"
   echo "                           suffix. Implies --build-disk-image. A size smaller than the"
   echo "                           gadget needs is ignored, with a warning. For a gadget with"
@@ -864,6 +869,50 @@ disk_structure_image () {
   [ ! -e "${image}" ] || echo "${image}"
 }
 
+# print the files of the output directory which hold a structure of a disk
+# image, the partition images of the structures written to it
+# - role of the structure, and the image written to it, if any
+disk_structure_files () {
+  local role="${1}"
+  local image="${2##*/}"
+  if [ "${BUILDER_CONFIG["AB_IMAGE"]}" = "true" ] && ab_disk_structure_files "${role}"; then
+    return
+  fi
+  case "${image}" in
+    ("")
+      ;;
+    # a file system image is written raw, the output directory has it sparse,
+    # or compressed
+    (*.raw)
+      echo "${image%.raw}.img"
+      echo "${image%.raw}.img.xz"
+      ;;
+    (*)
+      echo "${image}"
+      ;;
+  esac
+}
+
+# remove the partition images from the output directory, which the disk images
+# hold now. The disk images, and the images of the eMMC volumes, which have no
+# disk image, are kept, as are files which are not a partition's, such as
+# flashing lists
+remove_disk_partition_files () {
+  local file
+  [ "${#DISK_PARTITION_FILES[@]}" -gt 0 ] || return 0
+  while IFS= read -r file
+  do
+    [ -n "${file}" ] || continue
+    if printf '%s\n' "${DISK_KEEP_FILES[@]}" | grep -q -x -F "${file}"; then
+      continue
+    fi
+    if [ -f "${BUILDER_CONFIG["OUTPUT_DIR"]}/${file}" ]; then
+      print_debug 2 "Removing ${file}, which the disk image holds"
+      rm -f "${BUILDER_CONFIG["OUTPUT_DIR"]}/${file}"
+    fi
+  done < <(printf '%s\n' "${DISK_PARTITION_FILES[@]}" | sort -u)
+}
+
 # print the size --image-size asks for a volume, in bytes, nothing if none
 # - name and index of the volume
 requested_disk_size () {
@@ -984,11 +1033,13 @@ create_volume_disk_image () {
     if [ -n "${image}" ]; then
       writes+=("${image}|${offset}")
     fi
+    mapfile -t -O "${#DISK_PARTITION_FILES[@]}" DISK_PARTITION_FILES < <(disk_structure_files "${role}" "${image}")
     # images of the gadget, written raw into the structure
     while IFS=$'\t' read -r image content_offset
     do
       [ -n "${image}" ] || continue
       writes+=("${BUILDER_CONFIG["GADGET_DIR"]}/${image}|$((offset + $(size_to_bytes "${content_offset}")))")
+      DISK_PARTITION_FILES+=("${image##*/}")
     done < <(vol=${volume} idx=${index} "${YQ}" eval \
                '.volumes[strenv(vol)].structure[env(idx)].content[] | select(.image) | [.image, (.offset // 0)] | @tsv' \
                "${BUILDER_CONFIG["GADGET_YAML"]}")
@@ -1041,8 +1092,13 @@ create_disk_images () {
     # the hardware boot partitions of an eMMC are not on a disk
     if [ "$(vol=${volume} "${YQ}" eval '.volumes[strenv(vol)].schema' "${BUILDER_CONFIG["GADGET_YAML"]}")" = "emmc" ]; then
       print_debug 1 "\nSkipping disk image of eMMC hardware volume ${volume}"
+      # its images are flashed as they are, they stay in the output directory
+      mapfile -t -O "${#DISK_KEEP_FILES[@]}" DISK_KEEP_FILES < <(vol=${volume} "${YQ}" eval \
+        '.volumes[strenv(vol)].structure[].content[] | select(.image) | .image | sub(".*/", "")' \
+        "${BUILDER_CONFIG["GADGET_YAML"]}")
       continue
     fi
+    DISK_KEEP_FILES+=("${volume}.img")
     create_volume_disk_image "${volume}" "${index}"
   done
 }
@@ -1528,6 +1584,12 @@ fi
 generate_manifest
 if [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" ]; then
   cp "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-core-image.revisions" "${BUILDER_CONFIG["MANIFEST_DIR"]}"
+fi
+
+# the partition images are in the disk images, once the manifest, which has the
+# checksums of the A/B slot images, is written
+if [ "${BUILDER_CONFIG["BUILD_DISK_IMAGE"]}" = "true" ]; then
+  remove_disk_partition_files
 fi
 
 print_debug 0 "\nOutput available in: '${BUILDER_CONFIG["OUTPUT_DIR"]}'"

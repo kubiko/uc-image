@@ -52,7 +52,7 @@ Output and work directories which a build as root left are not removed, uc-image
 Images are built for u-boot, lk and grub, which is what the gadget's `bootloader` says.
 
 ## Whole disk images
-`--build-disk-image` builds `<volume>.img` for each gadget volume next to the partition images: the partition table and all content, at the offsets of `gadget.yaml`. It works for `gpt` and `mbr` volumes, skips `emmc` ones, which describe hardware partitions, and does not go with `--build-tar-seed`, `--build-dir-seed` or Ambarella amboot.
+`--build-disk-image` builds `<volume>.img` for each gadget volume: the partition table and all content, at the offsets of `gadget.yaml`. The partition images the disk images hold, and the gadget images written into them, are then removed from the output directory, as they are not needed. The images of an `emmc` volume stay, as do the files which are not a partition's, such as flashing lists, and the manifest. It works for `gpt` and `mbr` volumes, skips `emmc` ones, which describe hardware partitions, and does not go with `--build-tar-seed`, `--build-dir-seed` or Ambarella amboot.
 
 As with ubuntu-image, `ubuntu-boot`, `ubuntu-save` and `ubuntu-data` get space on the disk but no partition, as the install creates them. An image with A/B slots has all of its partitions, as they are not created on the device.
 

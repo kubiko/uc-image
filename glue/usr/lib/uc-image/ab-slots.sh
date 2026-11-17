@@ -13,7 +13,8 @@
 #
 # uc-image sources this file, and everything specific to A/B is in it. The main
 # script calls these functions only for a gadget that has the slots:
-#   ab_check_image, ab_create_images, ab_manifest, ab_disk_structure_image
+#   ab_check_image, ab_create_images, ab_manifest, ab_disk_structure_image,
+#   ab_disk_structure_files
 # Switch A/B support off with '--no-ab-support' or UC_IMAGE_AB_SUPPORT=off, or
 # leave this file out of the snap.
 
@@ -168,6 +169,31 @@ ab_disk_structure_image () {
       if [ "${role}" = "${apps_slot}" ] && [ -e "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-apps.img" ]; then
         echo "${BUILDER_CONFIG["WORK_DIR"]}/ubuntu-apps.img"
       fi
+      ;;
+    (system-slot-b | system-save | system-data)
+      ;;
+    (*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# print the files of the output directory which hold a structure of a disk
+# image, which it makes redundant, and return 1 for one the main script handles.
+# ubuntu-apps.img is the apps slot's also when no app snap is seeded, and it
+# is an empty file for the flashing lists
+# - role of the structure
+ab_disk_structure_files () {
+  case "${1}" in
+    (system-slot-a)
+      echo "ubuntu-system.img"
+      ;;
+    (system-boot-state)
+      echo "ubuntu-boot-state.img"
+      ;;
+    (apps-slot-a | apps-slot-b)
+      echo "ubuntu-apps.img"
       ;;
     (system-slot-b | system-save | system-data)
       ;;
